@@ -9,6 +9,10 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## scout — 1.0 (2026-04-25, Phase 3a)
+
+Fat-scout output: `{mpn, metadata, categories, extraction_pages, quality_verdict}`. Identifies datasheet characteristics, target category extensions, per-task page lists, and a quality verdict gating extraction dispatch.
+
 ## base — 1.0 (2026-04-19, v1.4)
 
 Initial version.
