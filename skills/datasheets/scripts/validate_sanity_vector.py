@@ -21,7 +21,13 @@ DEFAULT_TOLERANCE_PCT = 5.0
 
 
 def _resolve_path(extraction: dict, dotted: str):
-    """Resolve a dotted path. Each segment is a dict key."""
+    """Resolve a dotted path. Each segment is a dict key.
+
+    Lists at the terminal position are unwrapped via `_spec_value_pick`;
+    intermediate list indices are NOT supported (e.g., 'regulator.vin_range[0].max').
+    Phase 3a operates on single-condition SpecValue lists; multi-condition
+    indexing is deferred to v1.5.
+    """
     cur = extraction
     for part in dotted.split("."):
         if not isinstance(cur, dict) or part not in cur:
@@ -122,6 +128,7 @@ def diff(vector: dict, extraction: dict) -> dict:
     passed = sum(1 for x in fields_out if x["pass"])
     failed = len(fields_out) - passed
     return {
+        "schema_version": "1.0",
         "mpn": vector.get("mpn"),
         "fields": fields_out,
         "summary": {"total": len(fields_out), "passed": passed, "failed": failed},
