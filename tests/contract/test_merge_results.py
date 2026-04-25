@@ -166,10 +166,11 @@ def test_merge_writes_quality_score_field(workdir):
     _run("LM2596-ADJ", "--cache-dir", str(cache))
     out = json.loads((cache / "LM2596-ADJ.json").read_text())
     assert "quality_score" in out["extraction"]
-    assert (
-        out["extraction"]["quality_score"] is None
-        or 0 <= out["extraction"]["quality_score"] <= 100
-    )
+    score = out["extraction"]["quality_score"]
+    assert score is not None
+    assert 0 <= score <= 100
+    # LM2596-ADJ happy-path fixture should comfortably pass the 60-floor
+    assert score >= 60, f"score {score} below 60-floor; rubric or fixture out of sync"
 
 
 FAILED_FIX = FIX / "result-regulator-failed.example.json"

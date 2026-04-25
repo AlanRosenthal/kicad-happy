@@ -271,8 +271,13 @@ def merge(cache: Path, mpn: str, *, retry_failed: bool = False) -> int:
                     cats.append(role)
             _record_outcome(plan, tid, 2, "partial", err)
 
-    # Quality score populated by datasheet_score.py extension (Task 8); null for now.
-    extraction["extraction"]["quality_score"] = None
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "skills/datasheets/scripts"))
+        from datasheet_score import score_v14_extraction
+        extraction["extraction"]["quality_score"] = score_v14_extraction(extraction)["score"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: quality scoring failed: {exc}", file=sys.stderr)
+        extraction["extraction"]["quality_score"] = None
     plan["execution"]["completed_at"] = _now_iso()
 
     out_path = cache / f"{mpn}.json"
