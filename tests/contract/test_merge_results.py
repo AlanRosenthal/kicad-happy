@@ -170,3 +170,73 @@ def test_merge_writes_quality_score_field(workdir):
         out["extraction"]["quality_score"] is None
         or 0 <= out["extraction"]["quality_score"] <= 100
     )
+
+
+FAILED_FIX = FIX / "result-regulator-failed.example.json"
+
+
+def _bad_schema_result() -> dict:
+    """status:complete but data violates regulator schema (missing topology)."""
+    return {
+        "task_id": "regulator",
+        "schema_version": "0.3",
+        "status": "complete",
+        "extracted_at": "2026-04-25T11:00:00Z",
+        "model_tier": "B",
+        "model_id": "claude-sonnet-4-6",
+        "data": {"vin_range": None},  # missing required `topology`
+    }
+
+
+def test_failed_status_triggers_retry_signal(workdir):
+    tmp, cache = workdir
+    (cache / "LM2596-ADJ.regulator.result.json").write_text(FAILED_FIX.read_text())
+    res = _run("LM2596-ADJ", "--cache-dir", str(cache))
+    assert res.returncode == 1
+    plan = json.loads((cache / "LM2596-ADJ.plan.json").read_text())
+    o = next(o for o in plan["execution"]["outcomes"] if o["task_id"] == "regulator")
+    assert o["final_status"] == "failed"
+    assert o["attempts"] == 1
+    assert "unable to locate" in (o["last_error"] or "")
+
+
+def test_schema_invalid_data_triggers_retry_signal(workdir):
+    tmp, cache = workdir
+    (cache / "LM2596-ADJ.regulator.result.json").write_text(json.dumps(_bad_schema_result()))
+    res = _run("LM2596-ADJ", "--cache-dir", str(cache))
+    assert res.returncode == 1
+    plan = json.loads((cache / "LM2596-ADJ.plan.json").read_text())
+    o = next(o for o in plan["execution"]["outcomes"] if o["task_id"] == "regulator")
+    assert o["final_status"] == "failed"
+    assert "schema validation" in (o["last_error"] or "")
+
+
+def test_retry_failed_with_still_failing_writes_partial_sentinel(workdir):
+    tmp, cache = workdir
+    (cache / "LM2596-ADJ.regulator.result.json").write_text(FAILED_FIX.read_text())
+    _run("LM2596-ADJ", "--cache-dir", str(cache))                          # first attempt
+    res = _run("LM2596-ADJ", "--cache-dir", str(cache), "--retry-failed")  # still failing
+    assert res.returncode == 0
+    out = json.loads((cache / "LM2596-ADJ.json").read_text())
+    assert out["regulator"] == {
+        "_extraction_failed": True,
+        "reason": "Subagent reported: 'unable to locate Electrical Characteristics table on requested pages'",
+    }
+    plan = json.loads((cache / "LM2596-ADJ.plan.json").read_text())
+    o = next(o for o in plan["execution"]["outcomes"] if o["task_id"] == "regulator")
+    assert o["final_status"] == "partial"
+    assert o["attempts"] == 2
+
+
+def test_retry_failed_with_now_passing_completes_cleanly(workdir):
+    tmp, cache = workdir
+    (cache / "LM2596-ADJ.regulator.result.json").write_text(FAILED_FIX.read_text())
+    _run("LM2596-ADJ", "--cache-dir", str(cache))                          # first attempt: fail
+    (cache / "LM2596-ADJ.regulator.result.json").write_text(REG_RESULT_FIX.read_text())  # repaired
+    res = _run("LM2596-ADJ", "--cache-dir", str(cache), "--retry-failed")
+    assert res.returncode == 0
+    out = json.loads((cache / "LM2596-ADJ.json").read_text())
+    assert out["regulator"]["topology"] == "buck"
+    plan = json.loads((cache / "LM2596-ADJ.plan.json").read_text())
+    o = next(o for o in plan["execution"]["outcomes"] if o["task_id"] == "regulator")
+    assert o["final_status"] == "complete"

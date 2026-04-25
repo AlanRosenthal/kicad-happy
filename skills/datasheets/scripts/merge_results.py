@@ -11,9 +11,9 @@ Failure semantics (Phase 3a):
   (no auto re-dispatch — the dispatcher recipe handles re-run); on second
   failure, partial-merge with {"_extraction_failed": true, "reason": ...}.
 
-Stdlib + jsonschema + referencing (already dev deps). Falls back to
-structural-only checks if jsonschema is absent so the script is importable
-without the dev venv (CI always has jsonschema).
+Stdlib + jsonschema + referencing (already dev deps). Requires jsonschema and
+referencing — hard imports, no fallback. The script's only purpose is schema
+validation; silent-pass on missing deps is dangerous.
 """
 
 from __future__ import annotations
@@ -24,13 +24,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    from jsonschema import Draft202012Validator
-    from referencing import Registry, Resource
-
-    _HAS_JSONSCHEMA = True
-except ImportError:  # pragma: no cover
-    _HAS_JSONSCHEMA = False
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -60,8 +55,6 @@ def _build_registry() -> "Registry":
 
 def _validate(data, schema: dict) -> "str | None":
     """Return error message on failure, None on success."""
-    if not _HAS_JSONSCHEMA:
-        return None
     registry = _build_registry()
     validator = Draft202012Validator(schema, registry=registry)
     errors = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
@@ -251,7 +244,7 @@ def merge(cache: Path, mpn: str, *, retry_failed: bool = False) -> int:
     if failed_tasks and not retry_failed:
         # First merge with failures: write plan state, exit nonzero.
         # Caller re-dispatches failed tasks, then re-runs with --retry-failed.
-        plan_path.write_text(json.dumps(plan, indent=2))
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True))
         for task, err in failed_tasks:
             print(f"failed: {task['task_id']}: {err}", file=sys.stderr)
         print(
@@ -283,8 +276,8 @@ def merge(cache: Path, mpn: str, *, retry_failed: bool = False) -> int:
     plan["execution"]["completed_at"] = _now_iso()
 
     out_path = cache / f"{mpn}.json"
-    out_path.write_text(json.dumps(extraction, indent=2))
-    plan_path.write_text(json.dumps(plan, indent=2))
+    out_path.write_text(json.dumps(extraction, indent=2, sort_keys=True))
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True))
     print(f"{mpn}: merged → {out_path}")
     return 0
 
