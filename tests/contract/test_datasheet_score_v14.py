@@ -98,3 +98,32 @@ def test_category_extension_dimension_zero_when_failed_sentinel():
 def test_score_in_zero_to_one_hundred():
     s = score_v14_extraction(_full_extraction())
     assert 0 <= s["score"] <= 100
+
+
+def test_score_does_not_crash_on_pinout_sentinel():
+    """Post-retry pinout failure → base.pinout = sentinel dict, not list."""
+    e = _full_extraction()
+    e["base"]["pinout"] = {"_extraction_failed": True, "reason": "pinout extractor failed twice"}
+    s = score_v14_extraction(e)
+    assert s["dimensions"]["pinout_completeness"] == 0.0
+    assert 0 <= s["score"] <= 100
+
+
+def test_score_does_not_crash_on_base_sentinel():
+    """Post-retry base failure → entire base block is the sentinel."""
+    e = _full_extraction()
+    e["base"] = {"_extraction_failed": True, "reason": "base extractor failed twice"}
+    s = score_v14_extraction(e)
+    assert s["dimensions"]["base_completeness"] == 0.0
+    assert s["dimensions"]["pinout_completeness"] == 0.0  # base.pinout doesn't exist
+    assert 0 <= s["score"] <= 100
+
+
+def test_score_does_not_crash_on_category_sentinel():
+    """Post-retry category failure (already covered by test_category_extension_dimension_zero_when_failed_sentinel,
+    but verifying overall score does not raise)."""
+    e = _full_extraction()
+    e["regulator"] = {"_extraction_failed": True, "reason": "regulator extractor failed twice"}
+    s = score_v14_extraction(e)
+    assert s["dimensions"]["category_extension_completeness"] == 0.0
+    assert 0 <= s["score"] <= 100

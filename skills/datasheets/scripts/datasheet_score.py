@@ -379,6 +379,8 @@ def _populated(value) -> bool:
 
 def _pinout_completeness(extraction: dict) -> float:
     pinout = ((extraction.get("base") or {}).get("pinout")) or []
+    if not isinstance(pinout, list):
+        return 0.0  # sentinel ({_extraction_failed: true}) or malformed pinout block
     if not pinout:
         return 0.0
     pts_per_pin = len(_PIN_FIELDS)
@@ -395,20 +397,17 @@ def _base_completeness(extraction: dict) -> float:
     base = extraction.get("base") or {}
     if not base:
         return 0.0
+    if isinstance(base, dict) and base.get("_extraction_failed"):
+        return 0.0  # base block extraction failed (post-retry sentinel)
     earned = 0
     total = sum(len(v) for v in _BASE_FIELD_REFS.values())
     for block, keys in _BASE_FIELD_REFS.items():
-        b = base.get(block) or ({} if block != "package" else {})
-        if block == "package":
-            for k in keys:
-                if _populated(b.get(k)):
-                    earned += 1
-        else:
-            if not isinstance(b, dict):
-                continue
-            for k in keys:
-                if _populated(b.get(k)):
-                    earned += 1
+        b = base.get(block) or {}
+        if not isinstance(b, dict):
+            continue
+        for k in keys:
+            if _populated(b.get(k)):
+                earned += 1
     return earned / total if total else 0.0
 
 
