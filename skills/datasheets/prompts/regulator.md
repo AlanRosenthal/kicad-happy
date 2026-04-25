@@ -40,7 +40,7 @@ Example (LM2596-ADJ):
 ```json
 {
   "topology": "buck",
-  "vin_range": [{"min": 4.5, "max": 40, "unit": "V", "min": null, "typ": null, "condition": null, "notes": null,
+  "vin_range": [{"min": 4.5, "max": 40, "unit": "V", "typ": null, "condition": null, "notes": null,
                  "evidence": {"page": 5, "section": "Recommended Operating Conditions", "confidence": "high", "method": "table"}}],
   "vout_range": [{"min": 1.23, "max": 37, "unit": "V", "typ": null, "condition": null, "notes": "Adjustable via FB divider",
                   "evidence": {"page": 1, "section": "Features", "confidence": "medium", "method": "prose"}}],
