@@ -97,3 +97,20 @@ def test_categories_array_lists_role_but_payload_missing_flags_error():
     del e["regulator"]
     issues = verify_v14_extraction(e)
     assert any(i["severity"] == "error" and "regulator" in i["description"] for i in issues)
+
+
+def test_partial_merge_sentinel_flags_error():
+    e = _ok_extraction()
+    e["regulator"] = {"_extraction_failed": True, "reason": "subagent could not locate EC table"}
+    issues = verify_v14_extraction(e)
+    sentinel_issues = [i for i in issues if "sentinel" in i["description"].lower()]
+    assert len(sentinel_issues) == 1
+    assert sentinel_issues[0]["severity"] == "error"
+    assert sentinel_issues[0]["path"] == "regulator"
+
+
+def test_empty_list_category_payload_flags_error():
+    e = _ok_extraction()
+    e["regulator"] = []
+    issues = verify_v14_extraction(e)
+    assert any(i["severity"] == "error" and "empty list" in i["description"] for i in issues)

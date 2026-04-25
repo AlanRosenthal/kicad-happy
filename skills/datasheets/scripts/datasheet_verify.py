@@ -617,11 +617,29 @@ def verify_v14_extraction(extraction: dict) -> list[dict]:
     cats = extraction.get("categories") or []
     for cat in cats:
         payload = extraction.get(cat)
-        if payload is None or (isinstance(payload, dict) and not payload):
+        if payload is None:
             issues.append({
-                "path": f"categories",
+                "path": f"categories[{cat!r}]",
                 "severity": "error",
-                "description": f"categories lists {cat!r} but top-level {cat} field is missing or empty",
+                "description": f"categories lists {cat!r} but top-level {cat} field is missing",
+            })
+        elif isinstance(payload, dict) and payload.get("_extraction_failed") is True:
+            issues.append({
+                "path": f"{cat}",
+                "severity": "error",
+                "description": f"category {cat!r} payload is the partial-merge sentinel: {payload.get('reason') or 'no reason given'}",
+            })
+        elif isinstance(payload, dict) and not payload:
+            issues.append({
+                "path": f"categories[{cat!r}]",
+                "severity": "error",
+                "description": f"categories lists {cat!r} but top-level {cat} field is an empty object",
+            })
+        elif isinstance(payload, list) and not payload:
+            issues.append({
+                "path": f"categories[{cat!r}]",
+                "severity": "error",
+                "description": f"categories lists {cat!r} but top-level {cat} field is an empty list",
             })
 
     return issues
