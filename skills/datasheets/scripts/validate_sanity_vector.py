@@ -40,11 +40,16 @@ def _spec_value_pick(value, key: str):
     """SpecValue lists carry [{min, typ, max, unit, ...}]. Scalars are used as-is.
 
     For list values, we pick the first element's `key` (Phase 3a is single-condition).
+    For scalar values (int/float/bool/str), only the `typ` key has meaning — the
+    scalar IS the typical value, with no min/max/unit. This lets sanity vectors
+    write `expected: {typ: 5}` for plain scalar fields like `package.pin_count`.
     """
     if isinstance(value, list) and value:
         return value[0].get(key) if isinstance(value[0], dict) else None
     if isinstance(value, dict):
         return value.get(key)
+    if isinstance(value, (int, float, bool, str)):
+        return value if key == "typ" else None
     return None
 
 
