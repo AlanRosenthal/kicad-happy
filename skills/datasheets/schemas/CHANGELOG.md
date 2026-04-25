@@ -13,6 +13,10 @@ Per-schema semver-lite versioning. Rules:
 
 Fat-scout output: `{mpn, metadata, categories, extraction_pages, quality_verdict}`. Identifies datasheet characteristics, target category extensions, per-task page lists, and a quality verdict gating extraction dispatch.
 
+## plan — 1.0 (2026-04-25, Phase 3a)
+
+Orchestration plan written by `plan_extraction.py`, consumed by the dispatcher and `merge_results.py`. Shape: `{plan_version, mpn, pdf_path, pdf_sha256, cache_dir, scout_ref, tasks[], execution: {started_at, completed_at, outcomes[]}}`. Each task carries `task_id`, `subagent_role`, `tier`, `schema`, `prompt_template`, `pages`, `depends_on`, `status`, `result_ref`.
+
 ## base — 1.0 (2026-04-19, v1.4)
 
 Initial version.

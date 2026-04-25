@@ -30,10 +30,11 @@ def test_scout_quality_verdict_required():
         Draft202012Validator(schema).validate(fixture)
 
 
-def test_scout_extraction_pages_must_include_base_and_pinout():
+@pytest.mark.parametrize("required_key", ["base", "pinout"])
+def test_scout_extraction_pages_must_include_base_and_pinout(required_key):
     schema = json.loads(SCHEMA_PATH.read_text())
     fixture = json.loads(FIXTURE_PATH.read_text())
     bad = json.loads(json.dumps(fixture))
-    bad["extraction_pages"].pop("base")
+    bad["extraction_pages"].pop(required_key)
     with pytest.raises(Exception):
         Draft202012Validator(schema).validate(bad)

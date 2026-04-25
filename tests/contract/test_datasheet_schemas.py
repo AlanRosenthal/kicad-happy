@@ -54,6 +54,8 @@ SCHEMA_FILES = [
     "regulator.schema.json",
     "extraction.schema.json",
     "manifest.schema.json",
+    "scout.schema.json",
+    "plan.schema.json",
 ]
 
 FIXTURE_TARGETS = [
