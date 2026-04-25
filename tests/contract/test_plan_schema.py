@@ -36,3 +36,11 @@ def test_plan_requires_pdf_sha():
     fixture.pop("pdf_sha256")
     with pytest.raises(Exception):
         Draft202012Validator(schema).validate(fixture)
+
+
+def test_plan_accepts_empty_tasks_for_skip_verdict():
+    """Skip-verdict plans have tasks: [] — schema must accept this."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    fixture = json.loads(json.dumps(json.loads(FIXTURE_PATH.read_text())))
+    fixture["tasks"] = []
+    Draft202012Validator(schema).validate(fixture)

@@ -17,7 +17,6 @@
     "scout_ref": {"type": "string", "description": "Filename of the unwrapped scout output relative to cache_dir."},
     "tasks": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "required": ["task_id", "subagent_role", "tier", "schema", "prompt_template", "pages", "depends_on", "status"],
