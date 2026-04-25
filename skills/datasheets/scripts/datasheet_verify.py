@@ -502,3 +502,142 @@ def run_datasheet_verification(analysis: dict, project_dir: str = "") -> dict:
             "by_severity": by_severity,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# v1.4 extension: verify_v14_extraction (Phase 3a)
+# ---------------------------------------------------------------------------
+
+def _spec_max(sv_list):
+    if isinstance(sv_list, list) and sv_list and isinstance(sv_list[0], dict):
+        return sv_list[0].get("max")
+    return None
+
+
+def _spec_min(sv_list):
+    if isinstance(sv_list, list) and sv_list and isinstance(sv_list[0], dict):
+        return sv_list[0].get("min")
+    return None
+
+
+def _all_pin_numbers(pinout):
+    nums = set()
+    for pin in pinout or []:
+        for n in pin.get("numbers", []) or []:
+            nums.add(str(n))
+    return nums
+
+
+_REGULATOR_PIN_FIELDS = ("feedback_pin", "compensation_pin", "enable_pin", "power_good_pin", "vin_pin", "vout_pin")
+
+
+def verify_v14_extraction(extraction: dict) -> list[dict]:
+    """Return inconsistencies in a v1.4 extraction JSON.
+
+    Each finding: {path, severity ('warning'|'error'), description}.
+    Empty list = clean.
+    """
+    issues: list[dict] = []
+    base = extraction.get("base") or {}
+    pinout = base.get("pinout") or []
+    rec_op = base.get("recommended_operating") or {}
+    abs_max = base.get("absolute_max") or {}
+
+    # 1. power_domain references resolve to recommended_operating keys
+    rec_keys = set(rec_op.keys())
+    for i, pin in enumerate(pinout):
+        pd = pin.get("power_domain")
+        if pd is not None and pd not in rec_keys:
+            issues.append({
+                "path": f"base.pinout[{i}].power_domain",
+                "severity": "warning",
+                "description": f"power_domain {pd!r} does not resolve to a key in base.recommended_operating ({sorted(rec_keys)})",
+            })
+
+    # 2. min/max sanity within each SpecValue
+    for block_name, block in (("recommended_operating", rec_op), ("absolute_max", abs_max)):
+        for key, sv_list in (block or {}).items():
+            if not isinstance(sv_list, list):
+                continue
+            for j, sv in enumerate(sv_list):
+                if not isinstance(sv, dict):
+                    continue
+                lo, hi = sv.get("min"), sv.get("max")
+                if lo is not None and hi is not None:
+                    try:
+                        if float(lo) > float(hi):
+                            issues.append({
+                                "path": f"base.{block_name}.{key}[{j}]",
+                                "severity": "error",
+                                "description": f"min > max ({lo} > {hi})",
+                            })
+                    except (TypeError, ValueError):
+                        pass
+
+    # 3. recommended.max <= absolute.max for matching parameter pairs (heuristic on key suffix)
+    for rec_key, rec_list in rec_op.items():
+        rec_hi = _spec_max(rec_list)
+        if rec_hi is None:
+            continue
+        # Try exact match (rec key VIN ↔ abs_max key VIN_max), or same key in absolute_max
+        candidates = [f"{rec_key}_max", rec_key]
+        for cand in candidates:
+            if cand not in abs_max:
+                continue
+            abs_hi = _spec_max(abs_max[cand])
+            if abs_hi is None:
+                continue
+            try:
+                if float(rec_hi) > float(abs_hi):
+                    issues.append({
+                        "path": f"base.recommended_operating.{rec_key}",
+                        "severity": "error",
+                        "description": f"recommended.max ({rec_hi}) exceeds absolute_max.{cand}.max ({abs_hi})",
+                    })
+            except (TypeError, ValueError):
+                pass
+            break
+
+    # 4. regulator pin references resolve to pinout
+    pin_nums = _all_pin_numbers(pinout)
+    reg = extraction.get("regulator") or {}
+    if isinstance(reg, dict):
+        for f in _REGULATOR_PIN_FIELDS:
+            v = reg.get(f)
+            if v is None:
+                continue
+            if str(v) not in pin_nums:
+                issues.append({
+                    "path": f"regulator.{f}",
+                    "severity": "error",
+                    "description": f"references pin {v!r} which is not present in base.pinout ({sorted(pin_nums)})",
+                })
+
+    # 5. categories array consistency
+    cats = extraction.get("categories") or []
+    for cat in cats:
+        payload = extraction.get(cat)
+        if payload is None or (isinstance(payload, dict) and not payload):
+            issues.append({
+                "path": f"categories",
+                "severity": "error",
+                "description": f"categories lists {cat!r} but top-level {cat} field is missing or empty",
+            })
+
+    return issues
+
+
+def _cli_v14(argv: list[str] | None = None) -> int:
+    import argparse, json as _json, sys as _sys
+    ap = argparse.ArgumentParser(description="Verify v1.4 extraction JSON for cross-field consistency.")
+    ap.add_argument("extraction_path")
+    args = ap.parse_args(argv)
+    extraction = _json.loads(open(args.extraction_path).read())
+    issues = verify_v14_extraction(extraction)
+    _json.dump({"issues": issues, "count": len(issues)}, _sys.stdout, indent=2)
+    _sys.stdout.write("\n")
+    return 0 if not issues else 1
+
+
+if __name__ == "__main__":
+    sys.exit(_cli_v14())
