@@ -492,7 +492,7 @@ def test_base_block_from_fixture() -> None:
 
     # Sanity-check typed access.
     assert obj.family == "step-down switching regulator"
-    assert obj.package.code == "TO-263-5"
+    assert obj.package.code == "TO-263-5 (KTT)"
     assert obj.package.thermal_pad is True
     # Keyed-object shape: absolute_max["VIN_max"] is list[SpecValue].
     assert obj.absolute_max["VIN_max"][0].max == 45
@@ -500,9 +500,10 @@ def test_base_block_from_fixture() -> None:
     # Thermal uses compound units.
     assert obj.thermal["theta_ja"][0].unit == "°C/W"
     assert obj.thermal["theta_ja"][0].typ == 50
-    # Pinout access via wrapper.
+    # Pinout access via wrapper. Pipeline-extracted fixture uses verbose
+    # datasheet pin names ("Feedback" not "FB", "Output" not "OUT").
     assert len(obj.pinout) == 5
-    fb = obj.pinout.find(name="FB")
+    fb = obj.pinout.find(name="Feedback")
     assert fb is not None
     assert fb.numbers == ["4"]
     # pin_relationships empty list on this fixture.
@@ -588,11 +589,12 @@ def test_regulator_from_fixture() -> None:
     assert obj.power_good_pin is None
     # Canonical SI checked.
     assert obj.switching_freq[0].typ == 150000  # Hz, not 150 kHz
-    assert obj.cin_min[0].min == 4.7e-4        # F, not 470 µF
-    assert obj.inductor_range[0].min == 3.3e-5  # H, not 33 µH
+    # cin_min lifted from page 27 ("470 µF typical") → typ slot, F units.
+    assert obj.cin_min[0].typ == 4.7e-4         # F, not 470 µF
+    # inductor_range lifted from Figure 9-8 nomograph (22 µH–150 µH for LM2596-ADJ).
+    assert obj.inductor_range[0].min == 2.2e-5  # H, not 22 µH
     # Nested block access.
-    assert obj.stability_conditions.cap_types_allowed == ["tantalum", "electrolytic", "polymer"]
-    assert obj.stability_conditions.esr_range[0].max == 0.5
+    assert obj.stability_conditions.cap_types_allowed == ["electrolytic", "tantalum"]
     # Sequencing absent on this part.
     assert obj.sequencing is None
     # Round-trip.
@@ -678,12 +680,12 @@ def test_datasheet_facts_from_lm2596_fixture() -> None:
     assert facts.schema_version.base == "1.0"
     assert facts.schema_version.categories["regulator"] == "0.3"
     assert facts.base.family == "step-down switching regulator"
-    assert facts.base.package.code == "TO-263-5"
+    assert facts.base.package.code == "TO-263-5 (KTT)"
     assert facts.categories == ["regulator"]
     assert facts.regulator is not None
     assert facts.regulator.topology == "buck"
     # Pinout access across the stack.
-    en = facts.base.pinout.find(name="EN")
+    en = facts.base.pinout.find(name="ON/OFF")
     assert en is not None
     assert en.numbers == ["5"]
 
@@ -778,8 +780,8 @@ def test_datasheet_facts_quality_property_passthrough() -> None:
 
     fixture = _load_json(FIXTURE_DIR / "lm2596-adj.example.json")
     facts = from_dict(DatasheetFacts, fixture)
-    # LM2596-ADJ fixture has extraction.quality_score = 87
-    assert facts.quality == 87
+    # LM2596-ADJ fixture has extraction.quality_score = 98 (Phase 3a pipeline-produced).
+    assert facts.quality == 98
 
 
 def test_datasheet_facts_quality_none_when_not_scored() -> None:

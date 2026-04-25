@@ -38,17 +38,23 @@ _REGULATOR_TOPOLOGIES = ('boost', 'buck', 'ldo')
 _MCU_TOPOLOGIES = ('mcu',)
 
 # v1.3 pin-function name → v1.4 Pin.name patterns. Used by the derivation
-# helper to map a pin to its v1.3 functional category.
+# helper to map a pin to its v1.3 functional category. Includes verbose
+# datasheet variants ("Output", "Ground", etc.) — TI's family datasheets
+# print the long forms verbatim, and the v1.4 pipeline lifts pin names
+# verbatim from the source.
 _PIN_NAME_TO_FUNCTION: dict[str, str] = {
     "VIN": "VIN",
     "VIN+": "VIN",
+    "Input": "VIN",
     "OUT": "VOUT",
     "VOUT": "VOUT",
     "VOUT+": "VOUT",
+    "Output": "VOUT",
     "GND": "GND",
     "VSS": "GND",
     "AGND": "GND",
     "DGND": "GND",
+    "Ground": "GND",
 }
 
 
@@ -117,14 +123,14 @@ def _derive_regulator_features_v14(facts: DatasheetFacts) -> Optional[dict]:
     topo = facts.regulator.topology
 
     # Find VIN / VOUT pins by name via the Pinout wrapper (Track 2.2).
-    vin_pin_obj = facts.base.pinout.find(name="VIN")
-    if vin_pin_obj is None:
-        vin_pin_obj = facts.base.pinout.find(name="VIN+")
-    vout_pin_obj = facts.base.pinout.find(name="OUT")
-    if vout_pin_obj is None:
-        vout_pin_obj = facts.base.pinout.find(name="VOUT")
-    if vout_pin_obj is None:
-        vout_pin_obj = facts.base.pinout.find(name="VOUT+")
+    # Try short forms first, then verbose datasheet variants used by TI etc.
+    vin_pin_obj = (facts.base.pinout.find(name="VIN")
+                   or facts.base.pinout.find(name="VIN+")
+                   or facts.base.pinout.find(name="Input"))
+    vout_pin_obj = (facts.base.pinout.find(name="OUT")
+                    or facts.base.pinout.find(name="VOUT")
+                    or facts.base.pinout.find(name="VOUT+")
+                    or facts.base.pinout.find(name="Output"))
 
     def _first_number(pin) -> Optional[str]:
         return pin.numbers[0] if pin is not None and pin.numbers else None

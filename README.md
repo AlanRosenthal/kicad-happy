@@ -447,6 +447,25 @@ Or set up the [GitHub Action](github-action.md) and get automated analysis on ev
 | KiCad 6  | Full                          | Full | Full   |
 | KiCad 5  | Full (legacy `.sch` + `.lib`) | Full | Full   |
 
+## 🎯 v1.4 — Datasheet Extraction v2 (in development)
+
+v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** detectors consume from. Schema-driven structured extraction replaces ad-hoc PDF scraping; every value carries page-anchored evidence and a confidence label; per-detector trust gating lets analyzers downgrade or suppress findings based on source quality.
+
+**Phase 3a (thin slice — first end-to-end extraction):** scout subagent + base/pinout/regulator extractors + Python orchestration (`plan_extraction.py`, `merge_results.py`) + a swappable file-based dispatcher contract. First production extraction: LM2596-ADJ, scoring 98/100 with 10/10 critical values converging against an independent harness-authored sanity vector. Validated by a 4-check acceptance gate (schema validity, self-consistency via `datasheet_verify.py`, quality score ≥ 60, sanity-vector tolerance diff).
+
+**Highlights so far:**
+
+| Category | Capabilities |
+| --- | --- |
+| **Schema-driven extraction** | 7 JSON Schema Draft 2020-12 schemas (`base`, `pinout`, `spec_value`, `regulator`, `extraction`, `manifest`, `scout`, `plan`). Every numeric value is a `SpecValue` with min/typ/max/unit/condition/notes/evidence; every value carries `evidence: {page, section, confidence, method}`. Canonical SI units everywhere (capacitance in F, not µF; switching frequency in Hz, not kHz). |
+| **Typed Python access layer** | `from datasheet_types import DatasheetFacts, SpecValue, Pin, lookup, best, trusted, has_data` — fully-typed dataclasses with codec round-trip, `lookup(mpn, cache_dir)` facade with staleness detection, per-detector trust-gating helpers (tri-state: missing vs present-below-gate vs trusted). |
+| **v1.3 compat layer** | Dual-cache-read wrappers preserve the v1.3 detector API surface — analyzers gradually migrate to v1.4 typed access without flag-day cutover. |
+| **Pipeline architecture** | Option D file-based dispatcher contract: `plan_extraction.py` (stdlib) → orchestration plan JSON → swappable dispatcher (Claude Code recipe in v1.4; Codex/Gemini/SDK gated for v1.5) → per-task wrapped result files → `merge_results.py` (stdlib) validates + merges. Cross-agent compatibility via per-agent recipe docs, no Python branching. |
+| **Quality + correctness signals** | Three-dimension v1.4 quality rubric (pinout completeness, base completeness, category-extension completeness) plus reserved v1.5 dimensions. `datasheet_verify_v14_extraction` cross-checks: power_domain references resolve, recommended ≤ absolute, regulator pin references exist, partial-merge sentinels surface as errors. Sanity-vector diff tooling for harness-authored independent cross-checks. |
+| **Two independent LLM readings converge** | Phase 3a correctness signal: harness authors 12 critical-value sanity vectors blind (before any pipeline extraction lands). The 4-check acceptance gate diffs pipeline output against the sanity vector. Convergence = real cross-check, not self-validation. LM2596-ADJ thin slice: 10/10 fields within tolerance. |
+
+Phase 3b (5 remaining category schemas — mcu, opamp, transistor, diode, crystal — and 5 more end-to-end extractions) is next, followed by Phase 4 (Layer 2 LLM review layer + 6 new and 5 upgraded detectors consuming v1.4 facts).
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.

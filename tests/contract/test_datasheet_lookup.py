@@ -181,8 +181,8 @@ def test_lookup_quality_passthrough(tmp_path: Path) -> None:
     (cache_dir / "LM2596-ADJ.json").write_text(json.dumps(fixture))
 
     facts = lookup("LM2596-ADJ", cache_dir=cache_dir)
-    # LM2596-ADJ fixture has quality_score = 87.
-    assert facts.quality == 87
+    # LM2596-ADJ fixture has quality_score = 98 (Phase 3a pipeline-produced).
+    assert facts.quality == 98
 
 
 # ---------------------------------------------------------------------------
@@ -344,12 +344,12 @@ def test_lookup_full_happy_path_fresh_cache_with_matching_pdf(tmp_path: Path) ->
     assert facts._cache_context.stale_reason is None
     assert facts._cache_context.pdf_path == pdf_path
     # Quality passthrough.
-    assert facts.quality == 87
+    assert facts.quality == 98
     # Cache path attached.
     assert facts.cache_path == cache_dir / "LM2596-ADJ.json"
     # Typed access across the full composition (Track 2.2).
     assert facts.source.mpn == "LM2596-ADJ"
-    assert facts.base.pinout.find(name="EN").numbers == ["5"]
+    assert facts.base.pinout.find(name="ON/OFF").numbers == ["5"]
     assert facts.regulator.topology == "buck"
 
 
