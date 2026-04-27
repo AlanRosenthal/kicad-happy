@@ -9,6 +9,27 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## transistor.schema.json v1.0 — 2026-04-27
+
+Initial release. Phase 3b (extraction breadth). Fields cover BJT (NPN/PNP), MOSFET (N/P-channel), JFET, IGBT discrete transistors. Field union from 2N3904 (MCC NPN BJT, TO-92) + IRLML6344 (IR/Infineon N-MOSFET, SOT-23) datasheet review.
+
+Required: `transistor_type` (enum). All other fields nullable. BJT-vs-FET encoded as null fields per inactive type (no `oneOf` discriminator) — schema accepts a part with all FET fields populated and all BJT fields null, or vice versa. The prompt's hard rules document this exclusion explicitly.
+
+`pin_assignment` is a closed object with 6 nullable string fields (`base_pin`, `collector_pin`, `emitter_pin`, `gate_pin`, `drain_pin`, `source_pin`). For BJT/IGBT, populate base/collector/emitter; for FET/JFET, populate gate/drain/source. Pin-resolution against `base.pinout` is registered as the empty tuple in `_PIN_FIELDS_BY_CATEGORY["transistor"]` — the nested object's pin-string fields are not yet validated against pinout. v1.5 may add nested-object pin-resolution.
+
+`hfe`, `id_max`, `power_dissipation`, `vce_sat`, `rds_on` accept multiple SpecValues per part disambiguated via condition string (different test currents, gate voltages, or temperatures).
+
+`thermal_resistance` follows the diode-established convention: nested object with `rtheta_ja` / `rtheta_jc` / `rtheta_jl` nullable SpecValue lists (K/W or °C/W).
+
+`package.body_mm` follows the diode-established convention: nested `{length, width, height}` (no `_mm` suffix on inner fields; aligns with base.schema.json's pre-existing shape).
+
+**spec_value.schema.json amendments (required by transistor field set):**
+- Added `null` to `unit` type (dimensionless quantities — `hfe` current gain has no SI unit).
+- Added `"C"` (coulombs) to `unit` enum (gate charge fields `qg`, `qgd`).
+Both are additive non-breaking changes; existing cached extractions remain valid.
+
+---
+
 ## diode.schema.json v1.0 — 2026-04-27
 
 Initial release. Phase 3b (extraction breadth). Fields cover signal, switching, Schottky, zener, TVS, rectifier, bridge, and varicap diodes. Field union from 1N4148 (Vishay signal switching, DO-35) + MBRS540T3G (ON Semi Schottky power, SMC) datasheet review.

@@ -20,9 +20,9 @@
       "description": "Maximum value. null when not specified."
     },
     "unit": {
-      "type": "string",
-      "enum": ["V", "A", "s", "Hz", "Ω", "F", "H", "K", "W", "°C", "%", "ppm", "K/W", "°C/W"],
-      "description": "Canonical SI unit. Extraction converts datasheet units (µA, mV, kΩ, kHz, µF, etc.) before caching — consumers never parse unit prefixes. Compound units K/W and °C/W are allowed for thermal resistance (θJA, θJC, ψJT)."
+      "type": ["string", "null"],
+      "enum": ["V", "A", "C", "s", "Hz", "Ω", "F", "H", "K", "W", "°C", "%", "ppm", "K/W", "°C/W", null],
+      "description": "Canonical SI unit. Extraction converts datasheet units (µA, mV, kΩ, kHz, µF, nC, etc.) before caching — consumers never parse unit prefixes. Compound units K/W and °C/W are allowed for thermal resistance (θJA, θJC, ψJT). C (coulombs) for gate charge. null for dimensionless quantities (e.g. hFE current gain, power factor)."
     },
     "condition": {
       "type": ["string", "null"],

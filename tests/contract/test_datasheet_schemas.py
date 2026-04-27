@@ -114,8 +114,9 @@ def test_spec_value_unit_is_closed_enum() -> None:
     # (µA → A, mV → V, kΩ → Ω, kHz → Hz, °C/W → °C/W) so consumers never
     # see prefixes.
     expected = {
-        "V", "A", "s", "Hz", "Ω", "F", "H", "K", "W", "°C", "%", "ppm",
+        "V", "A", "C", "s", "Hz", "Ω", "F", "H", "K", "W", "°C", "%", "ppm",
         "K/W", "°C/W",
+        None,  # null allowed for dimensionless quantities (e.g. hFE current gain)
     }
     assert set(unit["enum"]) == expected
 

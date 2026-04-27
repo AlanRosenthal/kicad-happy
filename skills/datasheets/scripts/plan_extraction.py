@@ -29,7 +29,9 @@ CATEGORY_TASKS = {
                    "skills/datasheets/prompts/regulator.md"),
     "diode":      ("diode",      "B", "skills/datasheets/schemas/diode.schema.json",
                    "skills/datasheets/prompts/diode.md"),
-    # 3b remaining: mcu, opamp, transistor, crystal — added per-Stage as each
+    "transistor": ("transistor", "B", "skills/datasheets/schemas/transistor.schema.json",
+                   "skills/datasheets/prompts/transistor.md"),
+    # 3b remaining: mcu, opamp, crystal — added per-Stage as each
     # category's schema + prompt land
 }
 
