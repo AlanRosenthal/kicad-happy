@@ -724,7 +724,7 @@ def _cli_v14(argv: list[str] | None = None) -> int:
                 file=_sys.stderr,
             )
             return 2
-        sanitized = _re.sub(r"[^A-Za-z0-9_-]", "_", args.mpn.strip())
+        sanitized = _re.sub(r"[^A-Za-z0-9_.-]", "_", args.mpn.strip())
         path = args.extract_dir / f"{sanitized}.json"
     elif positional_mode:
         path = _Path(args.extraction_path)
