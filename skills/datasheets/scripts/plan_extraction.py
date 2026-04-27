@@ -35,7 +35,9 @@ CATEGORY_TASKS = {
                    "skills/datasheets/prompts/opamp.md"),
     "mcu":        ("mcu",        "B", "skills/datasheets/schemas/mcu.schema.json",
                    "skills/datasheets/prompts/mcu.md"),
-    # 3b remaining: crystal — added per-Stage as each schema + prompt land
+    "crystal":    ("crystal",    "B", "skills/datasheets/schemas/crystal.schema.json",
+                   "skills/datasheets/prompts/crystal.md"),
+    # All 5 Phase 3b categories registered (regulator from 3a + diode + transistor + opamp + mcu + crystal from 3b).
 }
 
 

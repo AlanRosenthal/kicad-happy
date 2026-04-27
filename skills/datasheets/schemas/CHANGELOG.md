@@ -9,6 +9,30 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## crystal.schema.json v1.0 — 2026-04-27
+
+Initial release. Phase 3b (extraction breadth). Final Phase 3b category. Fields cover AT-cut quartz crystals, ceramic resonators, TCXO, VCXO, OCXO. Field union from a single MVP MPN — ABM8G-106-12.000MHZ-T (Abracon 12 MHz AT-cut fundamental SMD crystal, 3.2×2.5×1.0 mm) — per harness Stage 0 coordination.
+
+Required: `crystal_type` (enum: `at_cut | ceramic_resonator | tcxo | vcxo | ocxo`). All other fields nullable. Smallest Phase 3b schema (12 properties); crystals have less parameter spread than active ICs.
+
+`motional_capacitance` and `motional_inductance` are typically published only for AT-cut quartz; ceramic resonators / TCXO / VCXO / OCXO usually omit them. Schema supports null for both.
+
+`aging` uses plain `"ppm"` unit (no new unit needed). The first-year time window goes in the `condition` field (e.g. `"Aging @ 25°C ±3°C, first year"`). This aligns with the harness sanity vector, which stores aging as `{min: -3, max: 3, unit: "ppm"}` with a first-year condition note.
+
+`mode` enum is `fundamental | overtone_3rd | overtone_5th` plus null. Most consumer crystals are fundamental-mode; overtone modes are common in low-noise oscillator applications. Null for ceramic resonators, TCXO, VCXO, OCXO (the term is not meaningful for integrated oscillators).
+
+`package.body_mm` follows the diode/transistor/opamp/mcu convention: nested `{length, width, height}` (no `_mm` suffix on inner keys).
+
+**Phase 3b deferred to v1.5:** The original brainstorm planned 2 MVP MPNs per category for field-union; crystal shipped with only 1 because the harness sanity-vector list (12 MPNs) had no crystal at brainstorm time. v1.5 will add a second crystal extraction (TCXO or low-frequency 32.768 kHz watch crystal preferred) to validate field-union coverage.
+
+**No spec_value.schema.json amendments required.** Aging stores in `"ppm"` with first-year condition. No new units needed.
+
+`thermal_resistance` is intentionally absent — crystals rarely publish thermal resistance figures. v1.5 may add it if TCXO/OCXO datasheets prove otherwise.
+
+**Pin-resolution:** crystals have no pin-reference fields; `_PIN_FIELDS_BY_CATEGORY["crystal"]` is the empty tuple (already set in Task 2).
+
+---
+
 ## mcu.schema.json v1.0 — 2026-04-27
 
 Initial release. Phase 3b (extraction breadth). Catalog-tier-only extraction: identity-level facts (core, memory, peripheral counts, package, supply, debug interface, reset pin, temperature grades). Per-peripheral instance and pin-mux detail is explicitly deferred to Tier 2 (`mcu_peripherals.schema.json`, v1.5). Field union from ATmega328P-AU (Atmel/Microchip 8-bit AVR, TQFP-32, 32K flash) + STM32F103C8T6 (ST Cortex-M3 32-bit, LQFP-48, 64K flash).
