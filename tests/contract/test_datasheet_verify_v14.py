@@ -116,6 +116,83 @@ def test_empty_list_category_payload_flags_error():
     assert any(i["severity"] == "error" and "empty list" in i["description"] for i in issues)
 
 
+def _ok_opamp_extraction() -> dict:
+    return {
+        "schema_version": {"base": "1.0", "categories": {"opamp": "1.0"}},
+        "base": {
+            "recommended_operating": {},
+            "absolute_max": {},
+            "pinout": [
+                {"numbers": ["8"], "name": "SHDN", "type": "input", "subtype": None,
+                 "description": None, "power_domain": None, "alt_functions": [],
+                 "is_5v_tolerant": None, "absolute_max": None, "recommended": None,
+                 "drive_strength": None, "notes": None,
+                 "evidence": {"page": 3, "section": "Pinout", "confidence": "high", "method": "table"}},
+            ],
+        },
+        "categories": ["opamp"],
+        "opamp": {"shutdown_pin": "8"},
+    }
+
+
+def test_opamp_unresolved_shutdown_pin_flags_error():
+    e = _ok_opamp_extraction()
+    e["opamp"]["shutdown_pin"] = "99"  # not in pinout
+    issues = verify_v14_extraction(e)
+    assert any(i["severity"] == "error" and i["path"] == "opamp.shutdown_pin" for i in issues)
+
+
+def test_opamp_resolved_shutdown_pin_no_issue():
+    issues = verify_v14_extraction(_ok_opamp_extraction())
+    pin_issues = [i for i in issues if "shutdown" in i["path"]]
+    assert pin_issues == []
+
+
+def _ok_mcu_extraction() -> dict:
+    return {
+        "schema_version": {"base": "1.0", "categories": {"mcu": "1.0"}},
+        "base": {
+            "recommended_operating": {},
+            "absolute_max": {},
+            "pinout": [
+                {"numbers": ["7"], "name": "NRST", "type": "input", "subtype": None,
+                 "description": None, "power_domain": None, "alt_functions": [],
+                 "is_5v_tolerant": None, "absolute_max": None, "recommended": None,
+                 "drive_strength": None, "notes": None,
+                 "evidence": {"page": 3, "section": "Pinout", "confidence": "high", "method": "table"}},
+            ],
+        },
+        "categories": ["mcu"],
+        "mcu": {"reset_pin": "7"},
+    }
+
+
+def test_mcu_unresolved_reset_pin_flags_error():
+    e = _ok_mcu_extraction()
+    e["mcu"]["reset_pin"] = "99"  # not in pinout
+    issues = verify_v14_extraction(e)
+    assert any(i["severity"] == "error" and i["path"] == "mcu.reset_pin" for i in issues)
+
+
+def test_mcu_resolved_reset_pin_no_issue():
+    issues = verify_v14_extraction(_ok_mcu_extraction())
+    pin_issues = [i for i in issues if "reset" in i["path"]]
+    assert pin_issues == []
+
+
+def test_diode_no_pin_fields_no_resolution_pass():
+    """Diode schema has no pin-reference fields — verify no pin issues are produced."""
+    e = {
+        "schema_version": {"base": "1.0", "categories": {"diode": "1.0"}},
+        "base": {"recommended_operating": {}, "absolute_max": {}, "pinout": []},
+        "categories": ["diode"],
+        "diode": {"diode_type": "schottky"},
+    }
+    issues = verify_v14_extraction(e)
+    pin_issues = [i for i in issues if "_pin" in i["path"]]
+    assert pin_issues == []
+
+
 # --- CLI tests ----------------------------------------------------------------
 # The harness 4-check gate (Check 2) calls the v1.4 CLI in flag-based mode:
 #   datasheet_verify.py --mpn <mpn> --extract-dir <dir> --self-consistency --json

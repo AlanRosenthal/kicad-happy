@@ -528,7 +528,14 @@ def _all_pin_numbers(pinout):
     return nums
 
 
-_REGULATOR_PIN_FIELDS = ("feedback_pin", "compensation_pin", "enable_pin", "power_good_pin", "vin_pin", "vout_pin")
+_PIN_FIELDS_BY_CATEGORY = {
+    "regulator": ("feedback_pin", "compensation_pin", "enable_pin", "power_good_pin", "vin_pin", "vout_pin"),
+    "diode": (),
+    "transistor": (),  # pin_assignment is a nested object — checked separately if needed
+    "opamp": ("shutdown_pin",),
+    "mcu": ("reset_pin",),  # boot_pins is a list-of-objects, deferred to v1.5 if validation needed
+    "crystal": (),
+}
 
 
 def verify_v14_extraction(extraction: dict) -> list[dict]:
@@ -598,17 +605,19 @@ def verify_v14_extraction(extraction: dict) -> list[dict]:
                 pass
             break
 
-    # 4. regulator pin references resolve to pinout
+    # 4. category pin references resolve to pinout (registry-driven)
     pin_nums = _all_pin_numbers(pinout)
-    reg = extraction.get("regulator") or {}
-    if isinstance(reg, dict):
-        for f in _REGULATOR_PIN_FIELDS:
-            v = reg.get(f)
+    for category, fields in _PIN_FIELDS_BY_CATEGORY.items():
+        block = extraction.get(category)
+        if not isinstance(block, dict) or block.get("_extraction_failed"):
+            continue
+        for f in fields:
+            v = block.get(f)
             if v is None:
                 continue
             if str(v) not in pin_nums:
                 issues.append({
-                    "path": f"regulator.{f}",
+                    "path": f"{category}.{f}",
                     "severity": "error",
                     "description": f"references pin {v!r} which is not present in base.pinout ({sorted(pin_nums)})",
                 })
