@@ -24,7 +24,7 @@ Produce a single JSON object matching this schema: `{{SCHEMA_PATH}}`.
 ## Hard rules
 
 1. **Canonical SI units everywhere.** Voltage in `V`, current in `A`, resistance in `Ω`, capacitance in `F` (NOT µF — store 470 µF as `4.7e-4` with unit `F`), inductance in `H`, frequency in `Hz`, temperature in `°C`, time in `s`, charge in `C`, power in `W`. Thermal resistance in `°C/W`.
-2. **Every numeric SpecValue requires an `evidence` block** with `page` (PDF page where the value was read), `section` (textual section name from the PDF), `confidence` (`high` for table values, `medium` for prose, `low` for ambiguous/inferred), and `method` (`table` | `prose` | `figure` | `derived`).
+2. **Every numeric SpecValue requires an `evidence` block** with `page` (PDF page where the value was read), `section` (textual section name from the PDF), `confidence` (`high` for table values, `medium` for prose, `low` for ambiguous/inferred), and `method` (one of `table`, `prose`, `curve`, `calculated`, `derived`). Use `curve` for values read off a graph, `calculated` for values resolved from a symbolic expression, `derived` for values inferred from other facts.
 3. **OMIT fields you cannot locate** rather than guessing. The schema marks every field as nullable except `package`. An empty value is much better than a hallucinated one.
 4. **For family PDFs**, extract values applicable to `{{MPN}}`. If a value is family-wide (e.g., absolute max VIN), state it. If it is variant-specific, state the variant value. Use `notes` field to call out variant-specific spec.
 5. **No pinout data here.** The pinout subagent runs separately.
