@@ -9,6 +9,38 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## mcu.schema.json v1.0 — 2026-04-27
+
+Initial release. Phase 3b (extraction breadth). Catalog-tier-only extraction: identity-level facts (core, memory, peripheral counts, package, supply, debug interface, reset pin, temperature grades). Per-peripheral instance and pin-mux detail is explicitly deferred to Tier 2 (`mcu_peripherals.schema.json`, v1.5). Field union from ATmega328P-AU (Atmel/Microchip 8-bit AVR, TQFP-32, 32K flash) + STM32F103C8T6 (ST Cortex-M3 32-bit, LQFP-48, 64K flash).
+
+Required: `core_family` (open string, not enum — accommodates future cores). All other fields nullable or defaultable.
+
+**Plain-integer memory and frequency fields** (NOT SpecValue lists — these specs have no min/typ/max spread worth capturing at catalog tier): `core_speed_max` (Hz), `flash_size` (bytes), `ram_size` (bytes), `eeprom_size` (bytes), `pin_count`, `gpio_count`, `nvic_priorities`. SpecValue lists used only for supply voltages with real min/max ranges: `vdd_range`, `vddio_range`, `vdda_range`. This avoids spec_value unit enum sprawl (`bytes` and `Hz` prefix variants not added).
+
+**peripheral_counts** is a closed object with required-int properties (`uart`, `spi`, `i2c`, `can`, `usb`, `ethernet`, `dac`, `timer_general`, `timer_advanced`, all `minimum: 0`). Convention: **0 for absent peripherals** (not null). When `peripheral_counts.dac = 0`, also set top-level `dac: null`. The prompt's hard rules document this exclusion explicitly. Per-instance peripheral configuration is Tier 2.
+
+**adc/dac** are closed summary objects (bit_depth, channel_count, sample_rate_max_hz) capturing the part-level ADC/DAC characteristics. Null when the part has no ADC/DAC. Not SpecValue fields — these are structural counts, not spread specs.
+
+**nvic_priorities** is null for non-Cortex-M cores (AVR, PIC, 8051, classic RISC-V without NVIC). For Cortex-M3: 16 (4-bit priority field). Documented in field description and prompt hard rule.
+
+**eeprom_size convention:** use `0` for parts with no EEPROM (STM32F103C8T6 → 0); use actual byte count for parts with EEPROM (ATmega328P → 1024); null only when not determinable.
+
+**debug_interface** is an enum string: `swd | jtag | swd_jtag | debugwire | pdi | spi_isp | none | null`. Covers the major debug/programming interfaces across AVR (debugwire), XMEGA (pdi), Cortex-M (swd, jtag, swd_jtag), and older ISP parts.
+
+**boot_pins** is an array of `{pin_number, function}` objects or an empty array (AVR uses fuses, not boot pins) or null.
+
+`reset_pin` matches `base.pinout[*].numbers` when populated. Pin-resolution registered as `_PIN_FIELDS_BY_CATEGORY["mcu"] = ("reset_pin",)` (from Task 2, already in verify_v14_extraction).
+
+**Inherited conventions from diode/transistor/opamp:**
+- `thermal_resistance`: nested object with `rtheta_ja`/`rtheta_jc`/`rtheta_jl` nullable SpecValue lists (K/W or °C/W).
+- `package.body_mm`: nested `{length, width, height}` (no `_mm` suffix on inner fields; aligns with base.schema.json's pre-existing body_mm shape).
+
+**No new spec_value.schema.json unit additions required.** Flash/RAM/EEPROM are plain integers; frequencies are plain integers; voltages use existing `"V"` unit. All 18 existing unit tokens remain unchanged.
+
+**Field count: 22 properties** (well under the 35-property ceiling).
+
+---
+
 ## opamp.schema.json v1.0 — 2026-04-27
 
 Initial release. Phase 3b (extraction breadth). Fields cover general-purpose, precision, rail-to-rail I/O, rail-to-rail output, JFET-input, CMOS-input, chopper, instrumentation, and comparator op-amps. Field union from LM358 (Fairchild → ON Semi BJT general-purpose dual single-supply, SOIC-8/PDIP-8) + MCP6004 (Microchip CMOS rail-to-rail I/O quad, SOIC-14/PDIP-14/TSSOP-14).
