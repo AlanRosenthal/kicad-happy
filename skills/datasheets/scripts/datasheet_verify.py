@@ -646,14 +646,119 @@ def verify_v14_extraction(extraction: dict) -> list[dict]:
 
 
 def _cli_v14(argv: list[str] | None = None) -> int:
-    import argparse, json as _json, sys as _sys
-    ap = argparse.ArgumentParser(description="Verify v1.4 extraction JSON for cross-field consistency.")
-    ap.add_argument("extraction_path")
+    """v1.4 verifier CLI.
+
+    Two invocation shapes supported:
+
+    1. Positional (original): ``datasheet_verify.py <extraction_path>``
+    2. Flag-based (harness 4-check gate, Check 2):
+       ``datasheet_verify.py --mpn <mpn> --extract-dir <dir> --self-consistency --json``
+
+    Output shape:
+        positional → {"issues": [...], "count": N}
+        flag-based with --json → {"violations": [...], "count": N, "mpn": ..., "extract_dir": ...}
+
+    Exit codes:
+        0  no issues
+        1  ≥1 issue
+        2  CLI / I/O error (missing file, bad JSON, missing required flags)
+    """
+    import argparse, json as _json, re as _re, sys as _sys
+    from pathlib import Path as _Path
+
+    ap = argparse.ArgumentParser(
+        description="Verify v1.4 extraction JSON for cross-field consistency."
+    )
+    ap.add_argument(
+        "extraction_path",
+        nargs="?",
+        help="path to <mpn>.json extraction (positional mode)",
+    )
+    ap.add_argument(
+        "--mpn",
+        help="MPN to look up under --extract-dir (flag mode)",
+    )
+    ap.add_argument(
+        "--extract-dir",
+        type=_Path,
+        help="directory containing <mpn>.json (flag mode)",
+    )
+    ap.add_argument(
+        "--self-consistency",
+        action="store_true",
+        help=(
+            "explicit opt-in to v1.4 self-consistency mode "
+            "(flag mode; required when using --mpn/--extract-dir)"
+        ),
+    )
+    ap.add_argument(
+        "--json",
+        dest="emit_json",
+        action="store_true",
+        help="emit harness-shape JSON ({violations: [...]}) instead of legacy {issues: [...]}",
+    )
     args = ap.parse_args(argv)
-    extraction = _json.loads(open(args.extraction_path).read())
+
+    flag_mode = bool(args.mpn or args.extract_dir or args.self_consistency)
+    positional_mode = args.extraction_path is not None
+
+    if flag_mode and positional_mode:
+        print(
+            "error: cannot mix positional extraction_path with --mpn/--extract-dir flags",
+            file=_sys.stderr,
+        )
+        return 2
+    if flag_mode:
+        if not (args.mpn and args.extract_dir and args.self_consistency):
+            print(
+                "error: flag mode requires --mpn, --extract-dir, and --self-consistency",
+                file=_sys.stderr,
+            )
+            return 2
+        sanitized = _re.sub(r"[^A-Za-z0-9_-]", "_", args.mpn.strip())
+        path = args.extract_dir / f"{sanitized}.json"
+    elif positional_mode:
+        path = _Path(args.extraction_path)
+    else:
+        ap.print_usage(_sys.stderr)
+        print(
+            "error: must supply either positional extraction_path "
+            "or --mpn/--extract-dir/--self-consistency",
+            file=_sys.stderr,
+        )
+        return 2
+
+    if not path.exists():
+        print(f"error: extraction file not found: {path}", file=_sys.stderr)
+        return 2
+    try:
+        extraction = _json.loads(path.read_text())
+    except _json.JSONDecodeError as exc:
+        print(f"error: extraction file is not valid JSON: {exc}", file=_sys.stderr)
+        return 2
+
     issues = verify_v14_extraction(extraction)
-    _json.dump({"issues": issues, "count": len(issues)}, _sys.stdout, indent=2)
-    _sys.stdout.write("\n")
+
+    if flag_mode and args.emit_json:
+        _json.dump(
+            {
+                "violations": issues,
+                "count": len(issues),
+                "mpn": args.mpn,
+                "extract_dir": str(args.extract_dir),
+            },
+            _sys.stdout,
+            indent=2,
+        )
+    elif args.emit_json or positional_mode:
+        _json.dump({"issues": issues, "count": len(issues)}, _sys.stdout, indent=2)
+    else:
+        # Flag mode without --json: minimal human summary.
+        print(f"{args.mpn}: {len(issues)} issue(s)")
+        for i in issues:
+            print(f"  [{i['severity']}] {i['path']}: {i['description']}")
+    if args.emit_json or positional_mode:
+        _sys.stdout.write("\n")
     return 0 if not issues else 1
 
 

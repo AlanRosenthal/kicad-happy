@@ -114,3 +114,123 @@ def test_empty_list_category_payload_flags_error():
     e["regulator"] = []
     issues = verify_v14_extraction(e)
     assert any(i["severity"] == "error" and "empty list" in i["description"] for i in issues)
+
+
+# --- CLI tests ----------------------------------------------------------------
+# The harness 4-check gate (Check 2) calls the v1.4 CLI in flag-based mode:
+#   datasheet_verify.py --mpn <mpn> --extract-dir <dir> --self-consistency --json
+# The legacy positional shape (datasheet_verify.py <path>) must keep working.
+
+import subprocess
+import sys
+
+SCRIPT = REPO / "skills/datasheets/scripts/datasheet_verify.py"
+
+
+def _run(*args):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _seed_extract_dir(tmp_path, mpn: str, extraction: dict):
+    extract_dir = tmp_path / "extracted"
+    extract_dir.mkdir()
+    (extract_dir / f"{mpn}.json").write_text(json.dumps(extraction, indent=2))
+    return extract_dir
+
+
+def test_positional_mode_clean_extraction_exits_zero(tmp_path):
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", _ok_extraction())
+    res = _run(str(extract_dir / "TEST-PART.json"))
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload == {"issues": [], "count": 0}
+
+
+def test_flag_mode_clean_extraction_emits_violations_shape(tmp_path):
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", _ok_extraction())
+    res = _run(
+        "--mpn", "TEST-PART",
+        "--extract-dir", str(extract_dir),
+        "--self-consistency",
+        "--json",
+    )
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["violations"] == []
+    assert payload["count"] == 0
+    assert payload["mpn"] == "TEST-PART"
+    assert payload["extract_dir"] == str(extract_dir)
+
+
+def test_flag_mode_propagates_violations(tmp_path):
+    bad = _ok_extraction()
+    bad["regulator"]["feedback_pin"] = "99"  # not in pinout
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", bad)
+    res = _run(
+        "--mpn", "TEST-PART",
+        "--extract-dir", str(extract_dir),
+        "--self-consistency",
+        "--json",
+    )
+    assert res.returncode == 1
+    payload = json.loads(res.stdout)
+    assert payload["count"] >= 1
+    paths = [v["path"] for v in payload["violations"]]
+    assert "regulator.feedback_pin" in paths
+
+
+def test_flag_mode_without_json_prints_human_summary(tmp_path):
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", _ok_extraction())
+    res = _run(
+        "--mpn", "TEST-PART",
+        "--extract-dir", str(extract_dir),
+        "--self-consistency",
+    )
+    assert res.returncode == 0, res.stderr
+    assert "TEST-PART: 0 issue" in res.stdout
+
+
+def test_flag_mode_requires_self_consistency_flag(tmp_path):
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", _ok_extraction())
+    res = _run(
+        "--mpn", "TEST-PART",
+        "--extract-dir", str(extract_dir),
+        "--json",
+    )
+    assert res.returncode == 2
+    assert "--self-consistency" in res.stderr
+
+
+def test_flag_and_positional_mixed_exits_two(tmp_path):
+    extract_dir = _seed_extract_dir(tmp_path, "TEST-PART", _ok_extraction())
+    res = _run(
+        str(extract_dir / "TEST-PART.json"),
+        "--mpn", "TEST-PART",
+        "--extract-dir", str(extract_dir),
+        "--self-consistency",
+    )
+    assert res.returncode == 2
+    assert "cannot mix" in res.stderr.lower()
+
+
+def test_flag_mode_missing_extraction_exits_two(tmp_path):
+    extract_dir = tmp_path / "extracted"
+    extract_dir.mkdir()
+    res = _run(
+        "--mpn", "DOES-NOT-EXIST",
+        "--extract-dir", str(extract_dir),
+        "--self-consistency",
+        "--json",
+    )
+    assert res.returncode == 2
+    assert "not found" in res.stderr.lower()
+
+
+def test_no_args_exits_two():
+    res = _run()
+    assert res.returncode == 2
+    assert "must supply" in res.stderr.lower()
