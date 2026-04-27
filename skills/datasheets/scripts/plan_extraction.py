@@ -27,7 +27,10 @@ ALWAYS_TASKS = {
 CATEGORY_TASKS = {
     "regulator":  ("regulator",  "B", "skills/datasheets/schemas/regulator.schema.json",
                    "skills/datasheets/prompts/regulator.md"),
-    # 3b: mcu, opamp, transistor, diode, crystal
+    "diode":      ("diode",      "B", "skills/datasheets/schemas/diode.schema.json",
+                   "skills/datasheets/prompts/diode.md"),
+    # 3b remaining: mcu, opamp, transistor, crystal — added per-Stage as each
+    # category's schema + prompt land
 }
 
 
@@ -87,7 +90,8 @@ def _build_plan(mpn: str, pdf_path: Path, pdf_sha: str, cache_dir: Path, scout: 
         if cat not in CATEGORY_TASKS:
             print(
                 f"warning: unsupported category {cat!r} in scout output "
-                f"(Phase 3a only supports regulator); skipping",
+                f"(not yet registered in CATEGORY_TASKS — supported: "
+                f"{sorted(CATEGORY_TASKS)}); skipping",
                 file=sys.stderr,
             )
             continue

@@ -9,6 +9,28 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## diode.schema.json v1.0 — 2026-04-27
+
+Initial release. Phase 3b (extraction breadth). Fields cover signal, switching, Schottky, zener, TVS, rectifier, bridge, and varicap diodes. Field union from 1N4148 (Vishay signal switching, DO-35) + MBRS540T3G (ON Semi Schottky power, SMC) datasheet review.
+
+Required: `diode_type` (enum). All other fields nullable to accommodate type-specific characteristics:
+- `vz` only for zeners
+- `trr` typically null for slow rectifiers/zeners
+- `cd` most relevant for varicaps and signal/switching diodes
+- `breakdown_voltage` separate from `vr_max` (1N4148 specs both at 100V; MBRS540T3G doesn't spec breakdown explicitly)
+
+**Field-union additions vs. design-spec field list** (per Decision 10, schema covers union of both MVP MPNs' fields): `breakdown_voltage`, `tj_max`, and the third `thermal_resistance.rtheta_jl` sub-field (junction-to-lead) were added during datasheet read of 1N4148 + MBRS540T3G — they were not in the original spec field list but are real datasheet-published parameters worth capturing. Spec deviation is licensed by the field-union methodology.
+
+`if_max` and `vr_max` accept multiple SpecValues per part disambiguated via condition string (continuous / average / repetitive peak; VRRM / VR / VRWM).
+
+`thermal_resistance` is a nested object with three nullable sub-fields (`rtheta_ja`, `rtheta_jc`, `rtheta_jl` — all SpecValue lists, K/W). Through-hole parts typically have only `rtheta_ja`; SMD parts often have both `rtheta_jl` and `rtheta_ja`.
+
+`package.body_mm` is a NESTED object `{length, width, height}` (Phase 3b option A convention — first new schema using this shape; inner field names align with `base.schema.json`'s pre-existing body_mm shape, no `_mm` suffix). Symmetric across categories (transistor/opamp/mcu/crystal will adopt same shape in subsequent tasks).
+
+Pin-resolution: diodes have no pin-reference fields; `_PIN_FIELDS_BY_CATEGORY["diode"]` is the empty tuple (already set in Task 2).
+
+---
+
 ## scout — 1.0 (2026-04-25, Phase 3a)
 
 Fat-scout output: `{mpn, metadata, categories, extraction_pages, quality_verdict}`. Identifies datasheet characteristics, target category extensions, per-task page lists, and a quality verdict gating extraction dispatch.

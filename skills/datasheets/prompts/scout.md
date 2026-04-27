@@ -12,9 +12,14 @@ Produce a single JSON object matching this schema: `{{SCHEMA_PATH}}`.
 
 1. **`metadata`** — manufacturer, datasheet revision (string from cover/footer), datasheet date, page count, source URL if printed on the PDF, whether this is a family PDF (multiple MPNs share it), and the family member MPN list if applicable.
 
-2. **`categories`** — the category extension(s) applicable to this MPN. Phase 3a vocabulary: `regulator` only. Other values (`mcu`, `opamp`, `transistor`, `diode`, `crystal`, `supervisor`) are reserved for Phase 3b — do not emit them yet.
+2. **`categories`** — the category extension(s) applicable to this MPN. Known categories: `regulator`, `diode`, `transistor`, `opamp`, `mcu`, `crystal`.
 
-   Choose `regulator` for: linear LDOs, switching converters (buck/boost/buck-boost/SEPIC/flyback), charge pumps, isolated converters.
+   - `regulator` — linear LDOs, switching converters (buck/boost/buck-boost/SEPIC/flyback), charge pumps, isolated converters.
+   - `diode` — signal, switching, Schottky, zener, TVS, rectifier, bridge, varicap diodes.
+   - `transistor` — BJT (NPN/PNP), MOSFET (N/P-channel), JFET, IGBT discrete transistors.
+   - `opamp` — operational amplifiers, comparators, instrumentation amplifiers.
+   - `mcu` — microcontrollers, microprocessors, DSPs.
+   - `crystal` — quartz crystals, oscillators, resonators.
 
 3. **`extraction_pages`** — per-task page numbers (1-indexed). Required keys:
    - `base` — pages with package/pinout headers, absolute max ratings, recommended operating conditions, ESD ratings, thermal information.
