@@ -116,7 +116,9 @@ def test_spec_value_unit_is_closed_enum() -> None:
     expected = {
         "V", "A", "C", "s", "Hz", "Ω", "F", "H", "K", "W", "°C", "%", "ppm",
         "K/W", "°C/W",
-        None,  # null allowed for dimensionless quantities (e.g. hFE current gain)
+        "V/s",  # slew rate (store 0.6V/µs as 6e5 V/s) — added for opamp v1.0
+        "dB",   # CMRR, PSRR, open-loop gain — added for opamp v1.0
+        None,   # null allowed for dimensionless quantities (e.g. hFE current gain)
     }
     assert set(unit["enum"]) == expected
 

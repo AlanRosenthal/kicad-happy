@@ -9,6 +9,39 @@ Per-schema semver-lite versioning. Rules:
 
 ---
 
+## opamp.schema.json v1.0 — 2026-04-27
+
+Initial release. Phase 3b (extraction breadth). Fields cover general-purpose, precision, rail-to-rail I/O, rail-to-rail output, JFET-input, CMOS-input, chopper, instrumentation, and comparator op-amps. Field union from LM358 (Fairchild → ON Semi BJT general-purpose dual single-supply, SOIC-8/PDIP-8) + MCP6004 (Microchip CMOS rail-to-rail I/O quad, SOIC-14/PDIP-14/TSSOP-14).
+
+Required: `opamp_topology` (enum) + `channels` (integer). All other fields nullable.
+
+**Topology enum addition vs. design spec:** the design spec listed 8 topology values; v1.0 ships 9 — added `comparator` to cover open-collector comparator parts (LM393, LM339) which share op-amp IC families and packages. Treating comparators as an opamp-topology variant rather than a separate schema reduces Phase 3b/4 fragmentation; downstream consumers gate on the enum value.
+
+`iq_per_amp` is per-channel quiescent current (NOT total Iq — divide by `channels` if the datasheet only gives total supply current ICC).
+
+`shutdown_pin` matches `base.pinout[*].numbers` when populated. Both MVP MPNs lack a shutdown pin (`null` for both); the field exists for future shutdownable parts (e.g. MCP6N11, OPA376). Pin-resolution registered as `_PIN_FIELDS_BY_CATEGORY["opamp"] = ("shutdown_pin",)` (already from Task 2).
+
+`vsupply_range` is the total spread (V+ to V−). LM358 spans 3–32V single = ±1.5V to ±16V split; the schema stores the single-supply equivalent with a condition note for the split-supply range.
+
+`vout_swing_high` and `vout_swing_low` are stored as positive headroom-from-rail values (NOT absolute voltages). For rail-to-rail output parts, typical values are 25–50mV. For non-rail-to-rail parts (e.g. LM358), output swing high is 1.5–2V headroom from V+; output swing low is 5–20mV above V− at light load.
+
+**v1.4 deferrals** (deferred to v1.5 to avoid spec_value unit enum sprawl):
+- `noise_voltage_density` — would need `V/√Hz` unit
+- `noise_current_density` — would need `A/√Hz` unit
+- `phase_margin` — would need degrees unit
+These are real op-amp parameters but their units don't fit the canonical SI enum pattern cleanly.
+
+**spec_value.schema.json amendments (required by opamp field set):**
+- Added `"V/s"` to `unit` enum — slew rate in V/s (NOT V/µs; store 0.6V/µs as `6e5`).
+- Added `"dB"` to `unit` enum — CMRR, PSRR, open-loop gain.
+Both additive non-breaking changes; existing cached extractions remain valid.
+
+`thermal_resistance` follows the diode/transistor convention: `rtheta_ja`/`rtheta_jc`/`rtheta_jl` nullable SpecValue lists.
+
+`package.body_mm` follows the diode/transistor convention: nested `{length, width, height}` (no `_mm` suffix on inner fields; aligns with base.schema.json's body_mm shape).
+
+---
+
 ## transistor.schema.json v1.0 — 2026-04-27
 
 Initial release. Phase 3b (extraction breadth). Fields cover BJT (NPN/PNP), MOSFET (N/P-channel), JFET, IGBT discrete transistors. Field union from 2N3904 (MCC NPN BJT, TO-92) + IRLML6344 (IR/Infineon N-MOSFET, SOT-23) datasheet review.
