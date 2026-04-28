@@ -6,6 +6,8 @@ a self-describing dict consumable by kidoc, suggest-fixes, and lighter LLMs.
 
 from __future__ import annotations
 
+import hashlib
+
 VALID_SEVERITIES = ('error', 'warning', 'info')
 VALID_CONFIDENCES = ('deterministic', 'heuristic', 'datasheet-backed')
 VALID_EVIDENCE_SOURCES = (
@@ -16,6 +18,54 @@ VALID_FIX_TYPES = (
     'resistor_value_change', 'capacitor_value_change',
     'add_component', 'remove_component', 'swap_connection', 'add_protection',
 )
+
+
+def _normalize_locator(s):
+    """Lowercase + strip + collapse whitespace for finding_id locator portion."""
+    if s is None:
+        return ""
+    return " ".join(str(s).split()).lower()
+
+
+def _short_hash(s):
+    """SHA-256 prefix used as fallback locator when no component/net/pin available."""
+    return hashlib.sha256(str(s).encode("utf-8")).hexdigest()[:12]
+
+
+def _first_nonempty(*candidates):
+    """Return first non-empty list element of first non-None candidate list."""
+    for cand in candidates:
+        if cand:
+            for item in cand:
+                if item:
+                    return item
+    return None
+
+
+def _derive_finding_id(*, source, rule_id, detection_id, components, nets, pins, summary):
+    """Derive a stable finding_id per Phase 4 spec §3.2.
+
+    Priority:
+        1. {source}:{detection_id}        (detector provided one)
+        2. {source}:{rule_id}:{primary}   (component/net/pin locator)
+        3. {source}:{rule_id}:{hash}      (short SHA fallback on summary)
+    """
+    if detection_id:
+        return f"{source}:{detection_id}"
+    primary = _first_nonempty(components, nets, pins)
+    if primary is not None:
+        # Pin items may be dicts; coerce to string repr first
+        if isinstance(primary, dict):
+            primary = primary.get("ref") or primary.get("number") or str(primary)
+        return f"{source}:{rule_id}:{_normalize_locator(primary)}"
+    return f"{source}:{rule_id}:{_short_hash(summary)}"
+
+
+# Stub: real tuning matrix wiring lands in 4d-skeleton (Task 11).
+# Until then, this is identity: returns base severity unchanged.
+def _apply_severity_tuning(rule_id, base_severity, design_context):
+    """Apply severity tuning matrix per design_context. Stub returns identity in 4a."""
+    return base_severity
 
 
 def make_finding(
