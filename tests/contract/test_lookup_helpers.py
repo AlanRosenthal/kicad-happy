@@ -1,0 +1,54 @@
+"""Contract tests for skills/kicad/scripts/lookup_helpers.py."""
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "skills" / "kicad" / "scripts"))
+# datasheet_types package lives here; get_facts() lazy-imports it at call time.
+sys.path.insert(0, str(REPO_ROOT / "skills" / "datasheets"))
+
+
+def test_get_facts_returns_none_for_missing_mpn(tmp_path):
+    from lookup_helpers import get_facts
+    facts = get_facts("NONEXISTENT-MPN", cache_dir=tmp_path)
+    assert facts is None
+
+
+def test_get_facts_returns_none_for_empty_mpn(tmp_path):
+    from lookup_helpers import get_facts
+    assert get_facts(None, cache_dir=tmp_path) is None
+    assert get_facts("", cache_dir=tmp_path) is None
+
+
+def test_get_facts_returns_object_for_extant_mpn(tmp_path):
+    """Use the LM2596-ADJ fixture from skills/datasheets/schemas/fixtures."""
+    from lookup_helpers import get_facts
+    fixture_path = (REPO_ROOT / "skills" / "datasheets" / "schemas" / "fixtures"
+                    / "lm2596-adj.example.json")
+    if not fixture_path.exists():
+        pytest.skip("LM2596-ADJ fixture missing")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "LM2596-ADJ.json").write_text(fixture_path.read_text())
+    facts = get_facts("LM2596-ADJ", cache_dir=cache_dir)
+    assert facts is not None
+    # DatasheetFacts.mpn lives at facts.source.mpn (no top-level .mpn property).
+    assert facts.source.mpn == "LM2596-ADJ"
+
+
+def test_read_design_context_returns_none_when_absent(tmp_path):
+    from lookup_helpers import read_design_context
+    assert read_design_context(tmp_path) is None
+
+
+def test_read_design_context_returns_dict_when_present(tmp_path):
+    from lookup_helpers import read_design_context
+    dc = {"design_category": "power_supply", "environment": "industrial",
+           "compliance_targets": [], "user_declared_intent": None,
+           "confidence": "high", "evidence": "test", "resolution": "inferred_only"}
+    (tmp_path / "design_context.json").write_text(json.dumps(dc))
+    result = read_design_context(tmp_path)
+    assert result == dc
