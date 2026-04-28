@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 
 def get_facts(mpn, cache_dir=None):
