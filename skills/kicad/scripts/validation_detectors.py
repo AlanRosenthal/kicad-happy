@@ -425,12 +425,19 @@ def _closest_threshold(voltage: float) -> tuple:
 def validate_voltage_levels(ctx: AnalysisContext, level_shifters: list[dict] | None = None) -> list[dict]:
     """VM-001: Detect signal nets crossing power domain boundaries without level shifting."""
     findings: list[dict] = []
+    cache_dir = getattr(ctx, 'cache_dir', None)
+    design_context = getattr(ctx, 'design_context', None)
 
     ic_voltages: dict[str, float] = {}
     for ic in get_unique_ics(ctx):
         v = _estimate_rail_voltage_for_ic(ctx, ic['reference'])
         if v is not None:
             ic_voltages[ic['reference']] = v
+            # 4b lookup probe (informational; future v1.5 will use
+            # facts.base.recommended_operating.VDD to validate the rail estimate).
+            mpn = ic.get('mpn') or ic.get('value') or ''
+            facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
+            # facts probe is informational — confidence stays heuristic regardless.
 
     shifted_nets: set[str] = set()
     if level_shifters:
@@ -558,7 +565,8 @@ def validate_voltage_levels(ctx: AnalysisContext, level_shifters: list[dict] | N
             report_section='Signal Integrity',
             impact='Risk of damage or unreliable logic levels',
             provenance=make_provenance('vm_rail_mismatch', 'deterministic'),
-        
+            design_context=design_context,
+            schema_era='v1.4',
             source=ctx.source,))
 
     return findings
