@@ -1139,6 +1139,83 @@ def validate_led_resistors(ctx: AnalysisContext) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# XT-001: Crystal load capacitance mismatch
+# ---------------------------------------------------------------------------
+
+def validate_crystal_load_caps(
+    ctx: AnalysisContext,
+    crystal_circuits: list[dict],
+) -> list[dict]:
+    """XT-001: Emit findings when crystal load capacitance is out_of_spec or marginal.
+
+    Reads pre-computed fields from detect_crystal_circuits() output:
+    - load_cap_status: 'ok' | 'marginal' | 'unverified' | 'out_of_spec'
+    - target_load_source: 'datasheet' | 'parsed_from_value' | 'frequency_default'
+    - effective_load_pF, target_load_pF, load_cap_error_pct
+
+    XT-001 fires only for 'out_of_spec' and 'marginal'; 'ok' and 'unverified' are silent.
+    Confidence/evidence_source tracks the target_load_source.
+    """
+    findings: list[dict] = []
+    design_context = getattr(ctx, 'design_context', None)
+
+    for xc in crystal_circuits:
+        status = xc.get('load_cap_status')
+        if status not in ('out_of_spec', 'marginal'):
+            continue
+
+        ref = xc.get('reference', '')
+        target_load_source = xc.get('target_load_source')
+        effective_pF = xc.get('effective_load_pF')
+        target_pF = xc.get('target_load_pF')
+        error_pct = xc.get('load_cap_error_pct')
+
+        if target_load_source == 'datasheet':
+            xt_confidence = 'datasheet-backed'
+            xt_evidence = 'datasheet'
+        else:
+            xt_confidence = 'heuristic'
+            xt_evidence = 'topology'
+
+        severity = 'warning' if status == 'out_of_spec' else 'info'
+
+        load_caps = xc.get('load_caps', [])
+        cap_refs = [lc['ref'] for lc in load_caps]
+
+        error_str = f'{error_pct:+.1f}%' if error_pct is not None else 'unknown'
+        eff_str = f'{effective_pF:.1f}pF' if effective_pF is not None else 'unknown'
+        tgt_str = f'{target_pF:.1f}pF' if target_pF is not None else 'unknown'
+        src_label = {'datasheet': 'datasheet', 'parsed_from_value': 'value string', 'frequency_default': 'frequency default'}.get(target_load_source or '', target_load_source or 'unknown')
+
+        findings.append(make_finding(
+            detector='validate_crystal_load_caps',
+            rule_id='XT-001',
+            category='timing',
+            summary=f'Crystal {ref}: load capacitance {status.replace("_", " ")} ({eff_str} vs {tgt_str} target)',
+            description=(
+                f'Crystal {ref} effective load capacitance is {eff_str} '
+                f'({error_str} from {tgt_str} target from {src_label}). '
+                f'Mismatched CL shifts oscillation frequency and may cause marginal startup.'
+            ),
+            severity=severity,
+            confidence=xt_confidence,
+            evidence_source=xt_evidence,
+            components=[ref] + cap_refs,
+            nets=[lc['net'] for lc in load_caps],
+            recommendation=(
+                f'Adjust load capacitors so CL_eff = (C1*C2)/(C1+C2) + C_stray ≈ {tgt_str}. '
+                f'Typical C_stray is 3-5pF.'
+            ),
+            provenance=make_provenance('xtal_load_cap_check', 'heuristic'),
+            design_context=design_context,
+            schema_era='v1.4',
+            source=ctx.source,
+        ))
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # FS-001: Feedback network stability pre-check
 # ---------------------------------------------------------------------------
 

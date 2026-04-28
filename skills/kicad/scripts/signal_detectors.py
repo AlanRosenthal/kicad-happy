@@ -24,6 +24,20 @@ from kicad_types import AnalysisContext
 from finding_schema import make_provenance
 from detector_helpers import index_two_pin_components, get_components_by_type, get_unique_ics
 
+try:
+    import os as _os, sys as _sys
+    _ds_scripts = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                '..', '..', 'datasheets', 'scripts')
+    if _os.path.isdir(_ds_scripts):
+        _sys.path.insert(0, _os.path.abspath(_ds_scripts))
+    from lookup_helpers import get_facts, has_data, best as _lookup_best
+    _HAS_LOOKUP = True
+except ImportError:
+    _HAS_LOOKUP = False
+    def get_facts(mpn, **kw): return None  # type: ignore[misc]
+    def has_data(specs): return False  # type: ignore[misc]
+    def _lookup_best(specs, **kw): return None  # type: ignore[misc]
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -938,11 +952,25 @@ def detect_crystal_circuits(ctx: AnalysisContext) -> list[dict]:
         target_load_pF = None
         target_load_source = None
         xtal_value = xtal.get("value", "")
+        # Probe datasheet first (highest authority): facts.crystal.load_capacitance.
+        # DatasheetFacts.crystal does not exist in v1.4 (CrystalBlock is v1.5 expansion),
+        # so _cl_specs will always be None today — heuristic always fires in v1.4.
+        # Wiring activates automatically once CrystalBlock lands.
+        _cache_dir = getattr(ctx, 'cache_dir', None)
+        _xtal_mpn = xtal.get('mpn') or xtal.get('value') or ''
+        _xtal_facts = get_facts(_xtal_mpn, cache_dir=_cache_dir) if _xtal_mpn else None
+        _cl_specs = getattr(getattr(_xtal_facts, 'crystal', None), 'load_capacitance', None)
+        if has_data(_cl_specs):
+            _cl_sv = _lookup_best(_cl_specs, min_confidence='medium')
+            if _cl_sv is not None and _cl_sv.typ is not None:
+                target_load_pF = _cl_sv.typ * 1e12  # Farads → pF
+                target_load_source = "datasheet"
         # Try parsing from value string: "16MHz/18pF", "8MHz 20pF"
-        load_match = re.search(r'(\d+\.?\d*)\s*pF', xtal_value, re.IGNORECASE)
-        if load_match:
-            target_load_pF = float(load_match.group(1))
-            target_load_source = "parsed_from_value"
+        if target_load_pF is None:
+            load_match = re.search(r'(\d+\.?\d*)\s*pF', xtal_value, re.IGNORECASE)
+            if load_match:
+                target_load_pF = float(load_match.group(1))
+                target_load_source = "parsed_from_value"
         # Frequency-based defaults — use granular lookup table
         if target_load_pF is None:
             freq = xtal_entry.get("frequency")
