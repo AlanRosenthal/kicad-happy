@@ -480,6 +480,20 @@ Three analyzer-side guarantees that Phase 4's Layer 2 review pipeline depends on
 
 11 commits on `v1.4-dev`; 354 contract tests passing. Hard invariants HI-1, HI-3, HI-5 covered by `tests/contract/test_finding_invariants.py` (HI-5 scoped to `make_finding`-produced findings; full-coverage assertions land in v1.5 with raw-dict migration).
 
+### Phase 4d-skeleton — Layer 2 Architecture (CLOSED 2026-04-28)
+
+`skills/kicad/review/` sub-component lands as the Layer 2 LLM review platform. v1.4 ships the data contract + merge pipeline + empty prompt scaffolds; 4d-active (later) writes the prompts and exercises end-to-end.
+
+**Schemas (3):** `design_context.schema.json` (closed-set enums per spec §15), `review_annotations.schema.json` (HI-8 invariants encoded — reason ≥20 chars, ≤5 reviewer observations, observation confidence capped at "medium"), `severity_tuning.schema.json`.
+
+**Scripts (3):** `merge_annotations.py` validates + applies overlays + enforces HI-2/3/8/9 + writes `analysis/merged/<analyzer>.json`; `build_review_plan.py` emits 2-task review plan with `task_type: "review"`; `validate_review.py` standalone CLI mirroring Phase 3a's `validate_extraction_result.py` pattern.
+
+**Data file:** `severity_tuning.json` (11 rule entries; conservative v1.4 first-ship; `error|warning|info` 3-tier vocabulary matches existing `finding_schema.py:9` canonical).
+
+**Plan schema amendment:** `task_type: "extraction" | "review"` field added to `plan.schema.json` (additive, default "extraction"). Phase 3 extraction plans unaffected.
+
+**Dispatcher recipe addendum:** `dispatch-claude-code.md` Phase 4 addendum routes `task_type: "review"` to review prompts.
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.
