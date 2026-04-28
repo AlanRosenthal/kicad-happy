@@ -98,7 +98,7 @@ def test_make_finding_populates_finding_id_from_summary_hash():
 
 
 def test_make_finding_passes_design_context_to_tuning_stub():
-    """Tuning stub should be identity in 4a; severity unchanged."""
+    """AM-001 has no 'medical' when-clause in severity_tuning.json; tuning algorithm passes severity through unchanged."""
     f = make_finding(
         source="sch",
         detector="test_detector",
@@ -112,7 +112,7 @@ def test_make_finding_passes_design_context_to_tuning_stub():
         components=["U1"],
         design_context={"environment": "medical"},
     )
-    assert f["severity"] == "warning"  # stub returns identity
+    assert f["severity"] == "warning"
 
 
 def test_make_finding_uses_detection_id_from_extra():

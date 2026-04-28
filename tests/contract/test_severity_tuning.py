@@ -31,13 +31,20 @@ def test_apply_tuning_returns_base_when_no_design_context():
     assert _apply_severity_tuning("AM-001", "warning", None) == "warning"
 
 
-def test_apply_tuning_floor_raises_info_to_warning():
-    """LR-001 default base 'info' is fine; AM-001 floor 'warning' for hobby env."""
+def test_apply_tuning_floor_does_not_lower_severity():
+    """AM-001 hobby floor 'warning' must not lower base severity 'error'."""
     from finding_schema import _apply_severity_tuning
     dc = {"environment": "hobby"}
-    # AM-001 base 'error' with hobby floor 'warning' — base above floor, unchanged
     result = _apply_severity_tuning("AM-001", "error", dc)
     assert result == "error"
+
+
+def test_apply_tuning_floor_raises_info_to_warning():
+    """AM-001 hobby floor 'warning' raises base severity 'info' up to 'warning'."""
+    from finding_schema import _apply_severity_tuning
+    dc = {"environment": "hobby"}
+    result = _apply_severity_tuning("AM-001", "info", dc)
+    assert result == "warning"
 
 
 def test_apply_tuning_delta_walks_warning_to_error():
