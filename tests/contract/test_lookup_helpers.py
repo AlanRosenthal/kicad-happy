@@ -52,3 +52,25 @@ def test_read_design_context_returns_dict_when_present(tmp_path):
     (tmp_path / "design_context.json").write_text(json.dumps(dc))
     result = read_design_context(tmp_path)
     assert result == dc
+
+
+def test_lookup_helpers_exports_has_data():
+    """has_data re-exported from lookup_helpers resolves to real datasheet_types impl."""
+    from lookup_helpers import has_data
+    # Empty/None → False
+    assert has_data([]) is False
+    assert has_data(None) is False
+    # Non-empty list → True (uses real bool(specs) logic from trust_gating.py)
+    sys.path.insert(0, str(REPO_ROOT / "skills" / "datasheets"))
+    from datasheet_types import SpecValue, Evidence
+    sv = SpecValue(unit="Ω", evidence=Evidence(page=1, confidence="medium", method="table"),
+                   min=1000.0, max=10000.0)
+    assert has_data([sv]) is True
+
+
+def test_lookup_helpers_exports_best():
+    """best re-exported from lookup_helpers resolves to real datasheet_types impl."""
+    from lookup_helpers import best
+    # Empty → None
+    assert best([], min_confidence="medium") is None
+    assert best(None, min_confidence="medium") is None

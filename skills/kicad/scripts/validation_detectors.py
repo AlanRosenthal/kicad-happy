@@ -35,15 +35,7 @@ from detector_helpers import (
 )
 from signal_detectors import _get_net_components
 from finding_schema import make_finding, make_provenance
-from lookup_helpers import get_facts
-
-try:
-    from datasheet_types import has_data as _ds_has_data, best as _ds_best
-    _HAS_DS_TYPES = True
-except ImportError:
-    _HAS_DS_TYPES = False
-    def _ds_has_data(specs): return False  # type: ignore[misc]
-    def _ds_best(specs, *, min_confidence): return None  # type: ignore[misc]
+from lookup_helpers import get_facts, has_data, best
 
 
 # ---------------------------------------------------------------------------
@@ -247,14 +239,14 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                     _specs = getattr(
                         getattr(facts, 'base', None), 'recommended_pullup_range', None
                     )
-                    if _ds_has_data(_specs):
-                        ds_range = _ds_best(_specs, min_confidence='medium')
+                    if has_data(_specs):
+                        ds_range = best(_specs, min_confidence='medium')
 
                 if ds_range is not None:
                     pu_confidence = 'datasheet-backed'
                     pu_evidence = 'datasheet'
-                    pu_min = ds_range.min if hasattr(ds_range, 'min') else _PULLUP_MIN_OHMS
-                    pu_max = ds_range.max if hasattr(ds_range, 'max') else _PULLUP_MAX_OHMS
+                    pu_min = ds_range.min if ds_range.min is not None else _PULLUP_MIN_OHMS
+                    pu_max = ds_range.max if ds_range.max is not None else _PULLUP_MAX_OHMS
                 else:
                     pu_confidence = 'heuristic'
                     pu_evidence = 'topology'

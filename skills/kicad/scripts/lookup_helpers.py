@@ -7,7 +7,26 @@ per Phase 4 spec §5.1: lookup() returning None falls back to heuristic.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+# Resolve skills/datasheets package path so detectors can import
+# `from lookup_helpers import has_data, best` without managing sys.path.
+# Path math: lookup_helpers.py → parents[0]=scripts, parents[1]=kicad, parents[2]=skills
+_DATASHEETS_PKG = Path(__file__).resolve().parents[2] / "datasheets"
+if _DATASHEETS_PKG.is_dir() and str(_DATASHEETS_PKG) not in sys.path:
+    sys.path.insert(0, str(_DATASHEETS_PKG))
+
+try:
+    from datasheet_types import has_data, best
+except ImportError:
+    def has_data(specs):
+        """Fallback when datasheet_types is unavailable. Returns False."""
+        return False
+
+    def best(specs, *, min_confidence):
+        """Fallback when datasheet_types is unavailable. Returns None."""
+        return None
 
 
 def get_facts(mpn, cache_dir=None):
