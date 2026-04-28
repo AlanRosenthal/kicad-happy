@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kicad-happy.dev/schemas/severity_tuning.schema.json",
+  "title": "Severity Tuning Matrix",
+  "description": "Detector severity tuning table consumed by make_finding factory. Phase 4 spec §4.4.",
+  "type": "object",
+  "required": ["version", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"type": "string"},
+    "rules": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Z]{2,4}-[0-9]{3}$": {
+          "type": "object",
+          "required": ["base_severity", "tuning_max_severity", "tuning"],
+          "additionalProperties": false,
+          "properties": {
+            "base_severity": {"$ref": "#/$defs/severity_enum"},
+            "tuning_max_severity": {"$ref": "#/$defs/severity_enum"},
+            "tuning": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["when"],
+                "additionalProperties": false,
+                "properties": {
+                  "when": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"}
+                  },
+                  "severity_delta": {"enum": ["+1"]},
+                  "severity_floor": {"$ref": "#/$defs/severity_enum"}
+                }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "severity_enum": {"enum": ["info", "warning", "error"]}
+  }
+}
