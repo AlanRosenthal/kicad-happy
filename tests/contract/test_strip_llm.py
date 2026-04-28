@@ -1,9 +1,30 @@
 """Test for strip_llm_overlays helper (Phase 4 spec §3.4 / HI-3)."""
+import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "kicad" / "scripts"))
 
 from finding_schema import strip_llm_overlays
+
+
+def _flatten_examples(data):
+    """Walk summarize_findings JSON output and collect all 'examples' strings.
+
+    The JSON shape may have rows[].examples[] or similar; this helper is
+    robust to either by walking all dicts and collecting any 'examples' value.
+    """
+    found = []
+    def _walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "examples" and isinstance(v, list):
+                    found.extend(str(x) for x in v)
+                _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+    _walk(data)
+    return found
 
 
 def test_strip_removes_top_level_llm_field():
@@ -32,7 +53,6 @@ def test_strip_round_trip_byte_identical_when_no_llm():
 
 def test_summarize_findings_only_deterministic_flag(tmp_path):
     """summarize_findings honors --only-deterministic by reading raw, not merged."""
-    import json
     import subprocess
     raw_dir = tmp_path / "analysis"
     raw_dir.mkdir()
@@ -53,6 +73,7 @@ def test_summarize_findings_only_deterministic_flag(tmp_path):
     merged = dict(raw)
     merged["findings"] = [
         dict(raw["findings"][0],
+             summary="merged finding",
              llm_review={"status": "suppressed", "reason": "x" * 25,
                           "confidence": "high", "reviewed_at": "2026-04-27T00:00:00Z"})
     ]
@@ -72,20 +93,31 @@ def test_summarize_findings_only_deterministic_flag(tmp_path):
     merged_run_dir.mkdir()
     (merged_run_dir / "schematic.json").write_text(json.dumps(merged))
 
-    # Default: reads from run_dir (raw)
+    # Default: merged/ exists, so this reads analysis/merged/<run>/<analyzer>.json
     result = subprocess.run(
         ["python3", "skills/kicad/scripts/summarize_findings.py",
          str(raw_dir), "--json"],
         capture_output=True, text=True, check=True,
         cwd=Path(__file__).resolve().parents[2],
     )
-    # With --only-deterministic: same — reads raw, not merged
+    # With --only-deterministic: merged/ is bypassed; reads raw analysis/<run>/<analyzer>.json
     result_det = subprocess.run(
         ["python3", "skills/kicad/scripts/summarize_findings.py",
          str(raw_dir), "--json", "--only-deterministic"],
         capture_output=True, text=True, check=True,
         cwd=Path(__file__).resolve().parents[2],
     )
-    # Both succeed; deterministic mode avoids reading merged at all
+    # Both modes return rc=0; assert behavioral distinction.
     assert result.returncode == 0
     assert result_det.returncode == 0
+    data_default = json.loads(result.stdout)
+    data_det = json.loads(result_det.stdout)
+    # Default mode read the merged finding (summary="merged finding").
+    # Deterministic mode read the raw finding (summary="raw finding").
+    # The summary is surfaced via the "examples" field in summarize_findings JSON output.
+    default_examples = _flatten_examples(data_default)
+    det_examples = _flatten_examples(data_det)
+    assert "merged finding" in default_examples, (
+        f"Default mode should read merged JSON; got examples: {default_examples}")
+    assert "raw finding" in det_examples, (
+        f"--only-deterministic should read raw JSON; got examples: {det_examples}")
