@@ -27,7 +27,9 @@ import time
 from envelopes.thermal import ThermalEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_upstream_artifact, build_compat
+from capability_mode import get_capability_mode_ref
 
+ANALYZER_SOURCE = "thermal"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1040,6 +1042,11 @@ def main():
 
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    from pathlib import Path as _Path
+    _analysis_dir = _Path(args.output).parent if args.output else _Path("analysis")
+    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
 
     # Determine output path
     output_path = args.output

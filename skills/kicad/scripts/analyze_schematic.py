@@ -128,7 +128,9 @@ from finding_schema import compute_trust_summary, sort_findings
 from envelopes.schematic import SchematicEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
+from capability_mode import get_capability_mode_ref
 
+ANALYZER_SOURCE = "sch"
 
 # ---------------------------------------------------------------------------
 # Case-insensitive distributor / MPN property helpers
@@ -3084,6 +3086,7 @@ def parse_legacy_schematic(path: str) -> dict:
         pin_net=pin_net,
         no_connects=all_no_connects,
     )
+    ctx.source = ANALYZER_SOURCE
     from netlist_queries import NetlistQueries
     ctx.nq = NetlistQueries(ctx)
 
@@ -8688,6 +8691,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
         generator_version=generator_version,
         hierarchy_context=hierarchy_ctx,
     )
+    ctx.source = ANALYZER_SOURCE
     from netlist_queries import NetlistQueries
     ctx.nq = NetlistQueries(ctx)
 
@@ -9225,6 +9229,10 @@ def main():
         from output_filters import format_text
         print(format_text(result.get('findings', []), args.audience or 'designer', args.stage))
         sys.exit(0)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
+    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
 
     indent = None if args.compact else 2
     output = json.dumps(result, indent=indent, default=str)

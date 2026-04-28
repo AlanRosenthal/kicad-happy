@@ -70,6 +70,7 @@ class AnalysisContext:
     ref_pins: dict[str, dict[str, tuple[str | None, str | None]]] = field(default_factory=dict)
     no_connects: list[dict] = field(default_factory=list)
     generator_version: str = "unknown"
+    source: str = "unknown"
     nq: 'NetlistQueries | None' = field(default=None, repr=False)
     hierarchy_context: dict | None = field(default=None, repr=False)
 

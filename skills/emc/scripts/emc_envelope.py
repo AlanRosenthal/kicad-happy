@@ -276,6 +276,11 @@ class EMCEnvelope:
         "description": "Board-level rollup (dimensions, layer count, "
                        "crystal + switching frequencies, ...)."})
 
+    # --- Phase 4 capability pointer ---
+    capability_mode_ref: Optional[dict] = field(default=None, metadata={
+        "description": "Pointer to canonical analysis/capability_mode.json run-level "
+                       "record. Shape: {source, run_id}. See Phase 4 spec §3.3."})
+
     # --- Stage/audience derived blocks ---
     audience_summary: Optional[dict] = field(default=None, metadata={
         "description": "Designer/reviewer/manager summary views. Present "

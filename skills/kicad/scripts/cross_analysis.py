@@ -28,7 +28,9 @@ from kicad_utils import build_net_id_map as _build_net_id_map
 from envelopes.cross_analysis import CrossAnalysisEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_upstream_artifact, build_compat
+from capability_mode import get_capability_mode_ref
 
+ANALYZER_SOURCE = "cross"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -227,7 +229,8 @@ def check_connector_current(schematic: dict, pcb: dict | None) -> list[dict]:
                     components=[ref], nets=[net_name],
                     recommendation=f'Widen trace on {net_name} to >= {min_w:.1f}mm or use copper pour.',
                     standard_ref='IPC-2152', impact='Trace overheating and voltage drop',
-                ))
+                
+                    source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -303,7 +306,8 @@ def check_esd_coverage_gaps(schematic: dict, pcb: dict | None) -> list[dict]:
                     'basis': 'IEC 61000-4-2 requires ESD protection on accessible pins',
                 },
                 standard_ref='IEC 61000-4-2', impact='ESD damage on unprotected pins',
-            ))
+            
+                source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -352,7 +356,8 @@ def check_decoupling_adequacy(schematic: dict, pcb: dict | None) -> list[dict]:
                     'basis': 'One 100nF per IC power pin pair minimum',
                 },
                 impact='Increased power supply noise and EMI',
-            ))
+            
+                source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -385,7 +390,8 @@ def check_cross_validation(schematic: dict, pcb: dict | None) -> list[dict]:
             components=sorted(real_missing)[:20],
             recommendation='Update PCB from schematic (Tools > Update PCB from Schematic).',
             impact='Missing components on manufactured board',
-        ))
+        
+            source=ANALYZER_SOURCE,))
 
     # XV-001: Components in PCB but not schematic
     real_extra = {r for r in in_pcb_not_sch if not r.startswith(('TP', 'MH', 'NT', 'FID', 'H', 'G'))}
@@ -397,7 +403,8 @@ def check_cross_validation(schematic: dict, pcb: dict | None) -> list[dict]:
             severity='info', confidence='deterministic', evidence_source='topology',
             components=sorted(real_extra)[:20],
             recommendation='Verify these are intentional (mounting holes, test points, fiducials).',
-        ))
+        
+            source=ANALYZER_SOURCE,))
 
     # XV-002: Value consistency
     pcb_fp_map = {fp.get('reference', ''): fp for fp in pcb.get('footprints', [])}
@@ -416,7 +423,8 @@ def check_cross_validation(schematic: dict, pcb: dict | None) -> list[dict]:
                 components=[ref],
                 recommendation='Sync PCB with schematic to resolve value differences.',
                 impact='Wrong component may be placed during assembly',
-            ))
+            
+                source=ANALYZER_SOURCE,))
 
     return findings
 
@@ -478,7 +486,8 @@ def check_critical_net_routing(schematic, pcb):
             nets=[net_name],
             recommendation=f'Re-route {net_name} at least {_EDGE_DISTANCE_WARN_MM}mm from board edges.',
             impact='Increased EMI radiation and susceptibility',
-        ))
+        
+            source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -521,7 +530,8 @@ def check_return_path_enhanced(schematic, pcb):
                         nets=[net_name],
                         recommendation='Re-route signal to avoid reference plane gaps.',
                         impact='Increased loop area and EMI',
-                    ))
+                    
+                        source=ANALYZER_SOURCE,))
         return findings
     flagged = set()
     for seg in segments:
@@ -555,7 +565,8 @@ def check_return_path_enhanced(schematic, pcb):
                     nets=[net_name, gap['net']],
                     recommendation=f'Re-route {net_name} to avoid the {gap["net"]} plane gap, or bridge with a stitching capacitor.',
                     impact='Increased EMI from enlarged return path loop',
-                ))
+                
+                    source=ANALYZER_SOURCE,))
                 flagged.add(net_name)
                 break
     return findings
@@ -611,7 +622,8 @@ def check_trace_width_power(schematic, pcb):
                 recommendation=f'Widen {net_name} traces to >= {min_w:.1f}mm or use copper pour.',
                 fix_params={'type': 'resistor_value_change', 'change': f'trace width -> {min_w:.1f}mm', 'basis': f'IPC-2152: {current:.1f}A'},
                 standard_ref='IPC-2152', impact='Trace overheating and voltage drop',
-            ))
+            
+                source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -678,7 +690,8 @@ def check_plane_splits(schematic, pcb):
             nets=[plane_net] + crossing_signals_rpc[:5],
             recommendation='Bridge the plane gap with copper pour or stitching vias.',
             impact='Return path discontinuity increases EMI',
-        ))
+        
+            source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -727,7 +740,8 @@ def check_via_stitching_density(schematic, pcb):
             severity='warning', confidence='deterministic', evidence_source='topology',
             recommendation=f'Add ground stitching vias at <= {max_spacing_mm:.0f}mm spacing.',
             impact='Poor ground plane connectivity between layers',
-        ))
+        
+            source=ANALYZER_SOURCE,))
         return findings
     cell_size = max_spacing_mm
     if cell_size <= 0:
@@ -752,7 +766,8 @@ def check_via_stitching_density(schematic, pcb):
             confidence='heuristic', evidence_source='topology',
             recommendation=f'Add ground stitching vias at <= {max_spacing_mm:.0f}mm intervals.',
             impact='Degraded ground plane connectivity at high frequencies',
-        ))
+        
+            source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -872,7 +887,8 @@ def check_diff_pair_quality(schematic, pcb):
                 nets=[p_net, n_net],
                 recommendation='Match via counts, layer transitions, and trace lengths between P and N.',
                 impact='Degraded signal integrity and increased common-mode EMI',
-            ))
+            
+                source=ANALYZER_SOURCE,))
     return findings
 
 
@@ -974,6 +990,11 @@ def main():
 
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    from pathlib import Path as _Path
+    _analysis_dir = _Path(args.output).parent if args.output else _Path("analysis")
+    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
 
     if args.text:
         from output_filters import format_text

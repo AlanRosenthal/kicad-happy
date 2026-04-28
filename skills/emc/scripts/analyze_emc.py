@@ -33,6 +33,9 @@ from finding_schema import compute_trust_summary
 from emc_envelope import EMCEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_upstream_artifact, build_compat
+from capability_mode import get_capability_mode_ref
+
+ANALYZER_SOURCE = "emc"
 
 # Shared severity weights — used by both risk score and per-net scoring.
 # Keyed on the v1.3 envelope vocabulary (error/warning/info); legacy
@@ -541,6 +544,11 @@ def main():
         result['summary']['total_findings'] = len(_final)
         result['summary']['by_severity'] = _final_counts
     result['trust_summary'] = compute_trust_summary(_final)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    from pathlib import Path as _Path
+    _analysis_dir = _Path(args.output).parent if args.output else _Path("analysis")
+    result['capability_mode_ref'] = get_capability_mode_ref(_analysis_dir)
 
     # Analysis cache integration
     if args.analysis_dir:

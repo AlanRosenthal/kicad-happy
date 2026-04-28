@@ -41,7 +41,9 @@ from finding_schema import compute_trust_summary, sort_findings
 from envelopes.pcb import PCBEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
+from capability_mode import get_capability_mode_ref
 
+ANALYZER_SOURCE = "pcb"
 
 # ---------------------------------------------------------------------------
 # Geometry helpers
@@ -6568,6 +6570,10 @@ def main():
         from output_filters import format_text
         print(format_text(result.get('findings', []), args.audience or 'designer', args.stage))
         sys.exit(0)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
+    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
 
     indent = None if args.compact else 2
     output = json.dumps(result, indent=indent, default=str)

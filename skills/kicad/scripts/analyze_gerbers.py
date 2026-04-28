@@ -31,7 +31,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from envelopes.gerber import GerberEnvelope  # noqa: E402
 from schema_codec import emit_schema  # noqa: E402
 from inputs_builder import build_inputs, build_compat  # noqa: E402
+from capability_mode import get_capability_mode_ref  # noqa: E402
 
+ANALYZER_SOURCE = "gerber"
 
 _POWER_KEYWORDS_GERBER = {"vcc", "vdd", "gnd", "agnd", "dgnd", "gndref",
                           "vss", "avdd", "dvdd", "vbat", "vbus", "vin"}
@@ -1598,6 +1600,10 @@ def main():
 
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
+
+    # Wire capability_mode_ref (Phase 4 spec §3.3).
+    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
+    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
 
     # Determine output path
     output_path = args.output

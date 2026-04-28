@@ -96,3 +96,8 @@ class ThermalEnvelope:
         "description": "Wall-clock analysis time in seconds."})
     missing_info: Optional[ThermalMissingInfo] = field(default=None, metadata={
         "description": "Emitted when any component used default thermal params."})
+
+    # --- Phase 4 capability pointer ---
+    capability_mode_ref: Optional[dict] = field(default=None, metadata={
+        "description": "Pointer to canonical analysis/capability_mode.json run-level "
+                       "record. Shape: {source, run_id}. See Phase 4 spec §3.3."})

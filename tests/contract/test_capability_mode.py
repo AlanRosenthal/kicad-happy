@@ -1,5 +1,6 @@
 """Contract tests for capability_mode.py canonical run-level writer."""
 import json
+import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "kicad" / "scripts"))
@@ -76,3 +77,24 @@ def test_read_schema_versions_returns_known_categories(tmp_path):
         # spec_value) must NOT appear.
         assert "base" not in versions
         assert "extraction" not in versions
+
+
+def test_capability_mode_ref_emitted_by_schematic_analyzer(tmp_path):
+    """Run analyze_schematic on the simple-project fixture and assert capability_mode_ref."""
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "simple-project"
+    sch_files = list(fixture.glob("*.kicad_sch"))
+    if not sch_files:
+        pytest.skip("simple-project fixture missing")
+    output = tmp_path / "analysis" / "schematic.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["python3", "skills/kicad/scripts/analyze_schematic.py",
+         str(sch_files[0]), "--output", str(output)],
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    data = json.loads(output.read_text())
+    assert "capability_mode_ref" in data
+    assert data["capability_mode_ref"]["source"] == "analysis/capability_mode.json"
+    assert "run_id" in data["capability_mode_ref"]
+    assert (tmp_path / "analysis" / "capability_mode.json").exists()
