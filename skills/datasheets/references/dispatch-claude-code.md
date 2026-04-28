@@ -143,3 +143,38 @@ ORCHESTRATOR:
   - If any failures → retry once, re-merge with --retry-failed
   - Hand off to harness for 4-check gate
 ```
+
+---
+
+## Phase 4 addendum: dispatching review tasks
+
+Phase 4 (Layer 2 review) reuses this same dispatcher contract per spec §4.5. Key differences:
+
+- Tasks have `task_type: "review"` (vs `"extraction"` for Phase 3 datasheet tasks).
+- Review tasks live under `skills/kicad/review/prompts/{design_context,reviewer}.md`.
+- Result schemas live under `skills/kicad/review/schemas/{design_context,review_annotations}.schema.json`.
+- Result paths are `analysis/<artifact>.json` (NOT `<mpn>.<task>.result.json` — review outputs are run-level, not MPN-level).
+
+### Task → Subagent mapping
+
+When you see a task with `task_type: "review"`:
+
+| `task_id` | Tier | Subagent prompt |
+|-----------|------|----------------|
+| `design_context` | B (cheaper) | `skills/kicad/review/prompts/design_context.md` |
+| `reviewer` | A (top tier) | `skills/kicad/review/prompts/reviewer.md` |
+
+Same dispatch primitive (Claude Code `Task` tool); same output-validation contract (validate against `result_schema` after subagent returns); same retry semantics (one retry on hard fail with error context).
+
+### Merge after review tasks complete
+
+Once both review tasks have written their result files, invoke:
+
+```bash
+python3 skills/kicad/review/scripts/merge_annotations.py \
+    --raw-dir analysis/ \
+    --review analysis/review_annotations.json \
+    --merged-dir analysis/merged/
+```
+
+This applies overlays to a copy of each raw analyzer JSON. The raw files remain unmodified.
