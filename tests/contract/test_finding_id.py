@@ -113,3 +113,20 @@ def test_make_finding_passes_design_context_to_tuning_stub():
         design_context={"environment": "medical"},
     )
     assert f["severity"] == "warning"  # stub returns identity
+
+
+def test_make_finding_uses_detection_id_from_extra():
+    """Detection_id passed via **extra must propagate into finding_id."""
+    f = make_finding(
+        source="sch",
+        detector="test_detector",
+        rule_id="AM-001",
+        category="test",
+        severity="warning",
+        confidence="heuristic",
+        evidence_source="topology",
+        summary="Test",
+        description="Test description",
+        detection_id="absolute_max:abc123def456",
+    )
+    assert f["finding_id"] == "sch:absolute_max:abc123def456"

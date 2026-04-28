@@ -85,8 +85,8 @@ def make_finding(
     report_section: str | None = None,
     impact: str | None = None,
     standard_ref: str | None = None,
-    source: str | None = None,            # NEW: analyzer source tag ("sch", "pcb", "emc", ...)
-    design_context: dict | None = None,   # NEW: optional design_context for severity tuning
+    source: str | None = None,
+    design_context: dict | None = None,
     **extra,
 ) -> dict:
     """Build a rich finding dict with consistent structure.
