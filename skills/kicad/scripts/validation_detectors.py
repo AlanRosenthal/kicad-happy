@@ -1240,6 +1240,8 @@ def validate_feedback_stability(
 ) -> list[dict]:
     """FS-001: Check regulator feedback networks for stability concerns."""
     findings: list[dict] = []
+    cache_dir = getattr(ctx, 'cache_dir', None)
+    design_context = getattr(ctx, 'design_context', None)
 
     for reg in power_regulators:
         ref = reg.get('ref', reg.get('reference', ''))
@@ -1254,6 +1256,16 @@ def validate_feedback_stability(
 
         parallel_impedance = (r_top * r_bottom) / (r_top + r_bottom) if (r_top + r_bottom) > 0 else 0
 
+        # 4b lookup wiring: probe regulator facts (currently informational only;
+        # validation logic stays heuristic). Future v1.5/4d-active will validate
+        # cout_min and esr_range against schematic when datasheet provides them.
+        mpn = reg.get('mpn') or ''
+        if not mpn:
+            comp_entry = ctx.comp_lookup.get(ref)
+            mpn = (comp_entry.get('mpn') if comp_entry else '') or ''
+        _facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
+        # _facts probe is informational — confidence stays heuristic regardless.
+
         if parallel_impedance < _FB_IMPEDANCE_MIN:
             findings.append(make_finding(
                 detector='validate_feedback_stability', rule_id='FS-001', category='power_integrity',
@@ -1263,7 +1275,8 @@ def validate_feedback_stability(
                 components=[ref, fb_div['r_top'].get('ref', ''), fb_div['r_bottom'].get('ref', '')],
                 recommendation=f'Increase divider resistors to achieve >{_FB_IMPEDANCE_MIN} ohm parallel impedance.',
                 provenance=make_provenance('fs_stability_check', 'heuristic'),
-            
+                design_context=design_context,
+                schema_era='v1.4',
                 source=ctx.source,))
 
         if parallel_impedance > _FB_IMPEDANCE_MAX:
@@ -1275,7 +1288,8 @@ def validate_feedback_stability(
                 components=[ref, fb_div['r_top'].get('ref', ''), fb_div['r_bottom'].get('ref', '')],
                 recommendation=f'Decrease divider resistors to below {_FB_IMPEDANCE_MAX/1000:.0f}k parallel impedance.',
                 provenance=make_provenance('fs_stability_check', 'heuristic'),
-            
+                design_context=design_context,
+                schema_era='v1.4',
                 source=ctx.source,))
 
         comp = ctx.comp_lookup.get(ref)
@@ -1297,7 +1311,8 @@ def validate_feedback_stability(
                         fix_params={'type': 'add_component', 'components': [{'type': 'capacitor', 'value': '10n', 'net_from': check_net, 'net_to': 'GND'}], 'basis': f'{comp.get("value", "")} requires external compensation'},
                         impact='Regulator may oscillate or have poor transient response',
                         provenance=make_provenance('fs_stability_check', 'heuristic'),
-                    
+                        design_context=design_context,
+                        schema_era='v1.4',
                         source=ctx.source,))
 
     return findings
