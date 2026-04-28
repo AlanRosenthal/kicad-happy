@@ -213,6 +213,10 @@ def main():
                         help='Path to .kicad-happy.json config')
     parser.add_argument('--spec', default=None,
                         help='Path to document spec JSON')
+    parser.add_argument('--only-deterministic', action='store_true',
+                        help='Accepted for flag consistency with other consumers; '
+                             'kidoc_generate processes markdown scaffolds and does not '
+                             'read analysis JSONs directly (Phase 4 spec §3.4).')
     args = parser.parse_args()
 
     if args.config:

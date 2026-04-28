@@ -51,12 +51,26 @@ def _resolve_run_dir(
     return path, run_id, manifest_version
 
 
-def _collect_findings(run_dir: str) -> list[dict]:
+def _resolve_analyzer_json(run_dir: str, name: str, only_deterministic: bool) -> str:
+    """Return the path to the analyzer JSON to load for a given filename.
+
+    When only_deterministic is False, check for a merged/ sibling directory
+    and prefer it if present. Falls back to the raw run_dir path.
+    """
+    if not only_deterministic:
+        merged_candidate = os.path.join(
+            os.path.dirname(run_dir), "merged", os.path.basename(run_dir), name)
+        if os.path.isfile(merged_candidate):
+            return merged_candidate
+    return os.path.join(run_dir, name)
+
+
+def _collect_findings(run_dir: str, only_deterministic: bool = True) -> list[dict]:
     out: list[dict] = []
     for name in sorted(os.listdir(run_dir)):
         if not name.endswith(".json"):
             continue
-        full = os.path.join(run_dir, name)
+        full = _resolve_analyzer_json(run_dir, name, only_deterministic)
         try:
             with open(full, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -69,7 +83,7 @@ def _collect_findings(run_dir: str) -> list[dict]:
     return out
 
 
-def _collect_assessments(run_dir: str) -> dict[str, int]:
+def _collect_assessments(run_dir: str, only_deterministic: bool = True) -> dict[str, int]:
     """Walk analyzer JSONs, group assessments by rule_id.
 
     Returns: dict {rule_id: count}. Assessments have no severity — they
@@ -80,7 +94,7 @@ def _collect_assessments(run_dir: str) -> dict[str, int]:
     for name in sorted(os.listdir(run_dir)):
         if not name.endswith(".json"):
             continue
-        full = os.path.join(run_dir, name)
+        full = _resolve_analyzer_json(run_dir, name, only_deterministic)
         try:
             with open(full, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -253,12 +267,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="Emit the aggregated table as JSON instead of text.")
     ap.add_argument("--by-confidence", action="store_true",
                     help="Group findings by confidence level instead of rule_id.")
+    ap.add_argument("--only-deterministic", action="store_true",
+                    help="Read raw analysis/<run>/<analyzer>.json instead of "
+                         "analysis/merged/<run>/<analyzer>.json. "
+                         "Strips Layer 2 overlays for CI/offline use (Phase 4 spec §3.4).")
     args = ap.parse_args(argv)
 
     run_dir, run_id, manifest_version = _resolve_run_dir(args.analysis_dir, args.run)
-    findings = _collect_findings(run_dir)
+    findings = _collect_findings(run_dir, only_deterministic=args.only_deterministic)
     findings = _filter_severity(findings, args.severity)
-    assessments_by_rule = _collect_assessments(run_dir)
+    assessments_by_rule = _collect_assessments(run_dir, only_deterministic=args.only_deterministic)
     assessment_total = sum(assessments_by_rule.values())
     if args.by_confidence:
         conf_rows = _aggregate_by_confidence(findings)

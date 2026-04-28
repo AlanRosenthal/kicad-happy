@@ -1295,6 +1295,10 @@ def main():
                         help="Ignore numeric deltas below this percentage (default: 1.0%%)")
     parser.add_argument("--trend", type=int, metavar="N",
                         help="Show metric trends across last N runs (requires --analysis-dir)")
+    parser.add_argument("--only-deterministic", action="store_true",
+                        help="Read raw analysis/<run>/<analyzer>.json instead of "
+                             "analysis/merged/<run>/<analyzer>.json. "
+                             "Strips Layer 2 overlays for CI/offline use (Phase 4 spec §3.4).")
     args = parser.parse_args()
 
     # Resolve runs from analysis cache if --analysis-dir is provided
@@ -1376,20 +1380,23 @@ def main():
             print()
         sys.exit(0)
 
-    # Load inputs
-    try:
-        with open(args.base) as f:
-            base = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Error reading base file {args.base}: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Load inputs (honor --only-deterministic: skip merged/ overlay)
+    def _load_input(path, label):
+        from pathlib import Path
+        p = Path(path)
+        if not args.only_deterministic:
+            candidate = p.parent.parent / "merged" / p.parent.name / p.name
+            if candidate.exists():
+                p = candidate
+        try:
+            with open(p) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Error reading {label} file {path}: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    try:
-        with open(args.head) as f:
-            head = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Error reading head file {args.head}: {e}", file=sys.stderr)
-        sys.exit(1)
+    base = _load_input(args.base, "base")
+    head = _load_input(args.head, "head")
 
     # Detect types
     base_type = detect_type(base)

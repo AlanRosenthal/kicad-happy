@@ -535,6 +535,11 @@ def main():
     parser.add_argument('--thermal-json', default=None,
                         help='Explicit path to thermal analyzer JSON. See '
                              '--schematic-json for mode notes.')
+    parser.add_argument('--only-deterministic', action='store_true',
+                        help='Read raw analysis JSONs instead of analysis/merged/ overlays. '
+                             'Accepted for flag consistency; when using explicit '
+                             '--schematic-json/--pcb-json/--emc-json/--thermal-json flags '
+                             'pass raw paths directly (Phase 4 spec §3.4).')
     args = parser.parse_args()
 
     # Load spec (--spec overrides --type)

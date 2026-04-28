@@ -6441,6 +6441,9 @@ def main():
                         help='Radius (mm) for copper-presence in return-path analysis (default: 0.5)')
     parser.add_argument('--gp001-debug', action='store_true',
                         help='Emit per-sample diagnostic JSON to analysis dir')
+    parser.add_argument('--only-deterministic', action='store_true',
+                        help='Accepted for consistency; analyzers never write llm_* fields. '
+                             'Honored by downstream consumers (Phase 4 spec §3.4).')
     args = parser.parse_args()
 
     if args.schema:

@@ -540,3 +540,20 @@ def group_findings_legacy(data):
 def is_old_schema(data):
     """Return True if data uses the pre-v1.3 signal_analysis wrapper format."""
     return "signal_analysis" in data and "findings" not in data
+
+
+def strip_llm_overlays(data):
+    """Recursively remove all keys starting with 'llm_'. Phase 4 spec §3.4 / HI-3.
+
+    Used by --only-deterministic flag to recover Layer 1 baseline from
+    merged outputs. The canonical implementation in 4d-skeleton lives in
+    skills/kicad/review/scripts/merge_annotations.py; this stub is the
+    same algorithm, re-exported here so analyzers don't depend on the
+    review sub-component for the deterministic baseline.
+    """
+    if isinstance(data, dict):
+        return {k: strip_llm_overlays(v) for k, v in data.items()
+                if not k.startswith("llm_")}
+    if isinstance(data, list):
+        return [strip_llm_overlays(item) for item in data]
+    return data

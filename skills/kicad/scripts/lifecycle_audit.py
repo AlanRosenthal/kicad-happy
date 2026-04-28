@@ -957,10 +957,20 @@ def main():
         "--suggest-alternatives", action="store_true",
         help="Search for replacement parts when EOL/NRND/obsolete (extra API calls)",
     )
+    parser.add_argument(
+        "--only-deterministic", action="store_true",
+        help="Read raw analysis/<run>/<analyzer>.json instead of "
+             "analysis/merged/<run>/<analyzer>.json. "
+             "Strips Layer 2 overlays for CI/offline use (Phase 4 spec §3.4).",
+    )
     args = parser.parse_args()
 
-    # Load analyzer JSON
+    # Load analyzer JSON (honor --only-deterministic: skip merged/ overlay)
     input_path = Path(args.input)
+    if not args.only_deterministic:
+        candidate = input_path.parent.parent / "merged" / input_path.parent.name / input_path.name
+        if candidate.exists():
+            input_path = candidate
     with open(input_path) as f:
         analysis = json.load(f)
 

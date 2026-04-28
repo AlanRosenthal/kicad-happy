@@ -1272,14 +1272,27 @@ def main():
                         help="Target value for --fix (e.g., 3.3 for Vout, 1000 for Hz)")
     parser.add_argument("--suggest-fixes", action="store_true",
                         help="Scan analysis for fixable issues and suggest component changes")
+    parser.add_argument("--only-deterministic", action="store_true",
+                        help="Read raw analysis/<run>/<analyzer>.json instead of "
+                             "analysis/merged/<run>/<analyzer>.json. "
+                             "Strips Layer 2 overlays for CI/offline use (Phase 4 spec §3.4).")
     args = parser.parse_args()
 
     if not args.changes and not args.fix and not args.suggest_fixes:
         parser.error("at least one REF=VALUE change, --fix, or --suggest-fixes is required")
 
-    # Load analysis JSON
+    # Load analysis JSON (honor --only-deterministic: skip merged/ overlay)
+    def _resolve_input_path(path):
+        from pathlib import Path
+        p = Path(path)
+        if not args.only_deterministic:
+            candidate = p.parent.parent / "merged" / p.parent.name / p.name
+            if candidate.exists():
+                return candidate
+        return p
+
     try:
-        with open(args.input) as f:
+        with open(_resolve_input_path(args.input)) as f:
             analysis = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         print(f"Error reading {args.input}: {e}", file=sys.stderr)

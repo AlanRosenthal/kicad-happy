@@ -9057,6 +9057,9 @@ def main():
     parser.add_argument('--audience', default=None,
                         choices=['designer', 'reviewer', 'manager'],
                         help='Audience level for summaries and --text output')
+    parser.add_argument('--only-deterministic', action='store_true',
+                        help='Accepted for consistency; analyzers never write llm_* fields. '
+                             'Honored by downstream consumers (Phase 4 spec §3.4).')
     args = parser.parse_args()
 
     if args.schema:
