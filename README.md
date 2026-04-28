@@ -470,7 +470,15 @@ New conventions established: `package.body_mm` is a NESTED object `{length, widt
 
 **v1.4 deferrals to v1.5:** opamp `noise_voltage_density`/`noise_current_density`/`phase_margin` (V/√Hz and degrees unit sprawl), MCU peripheral inventory Tier 2 (per-instance pin-mux detail), second crystal MPN extraction (only one was on the harness sanity-vector list at brainstorm time), MCU `core_speed_max` and opamp/mcu `TOPR` shape harmonization (harness flagged convention divergence).
 
-Phase 4 (Layer 2 LLM review layer + 6 new and 5 upgraded detectors consuming v1.4 facts) is next.
+### Phase 4a — Foundation Infrastructure (CLOSED 2026-04-28)
+
+Three analyzer-side guarantees that Phase 4's Layer 2 review pipeline depends on:
+
+1. **`run_id` wired through every analyzer.** The first analyzer in a run creates `analysis/capability_mode.json` (canonical run-level record); subsequent analyzers read its `run_id` and embed `capability_mode_ref` in their envelopes. Mirrors the `analysis_cache.py` manifest first-writer-wins pattern.
+2. **Stable `finding_id` derivation in `make_finding()` factory.** Every finding produced via `make_finding()` carries a `finding_id` of the form `{source}:{detection_id}` or `{source}:{rule_id}:{component|net|pin}` or `{source}:{rule_id}:{sha256(summary)[:12]}`. Re-running the same analyzer on the same inputs produces identical `finding_id` sets — overlay match keys for Layer 2 are stable across runs. v1.4 4a ships partial coverage; many raw-dict findings (most schematic detectors + all pcb/thermal/emc) gain `finding_id` when migrated to `make_finding` in v1.5.
+3. **`--only-deterministic` flag on ~13 CLIs.** Read-only semantics: analyzers never write `llm_*` fields; consumers (summarize, diff, kidoc, what_if, spice_tolerance, lifecycle_audit) read `analysis/<analyzer>.json` instead of `analysis/merged/<analyzer>.json` when set. Silent fallback when `analysis/merged/` is absent.
+
+11 commits on `v1.4-dev`; 354 contract tests passing. Hard invariants HI-1, HI-3, HI-5 covered by `tests/contract/test_finding_invariants.py` (HI-5 scoped to `make_finding`-produced findings; full-coverage assertions land in v1.5 with raw-dict migration).
 
 ## 🎯 v1.3 — Harmonized Analysis
 
