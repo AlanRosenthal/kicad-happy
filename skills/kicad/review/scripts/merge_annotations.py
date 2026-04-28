@@ -16,7 +16,6 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCHEMA_PATH = REPO_ROOT / "skills" / "kicad" / "review" / "schemas" / "review_annotations.schema.json"
@@ -55,12 +54,23 @@ def _validate_review_schema(review: dict) -> None:
     try:
         from jsonschema import Draft202012Validator
     except ImportError:
-        return  # jsonschema not installed; skip validation but log
+        print(
+            "WARNING: jsonschema not installed; review schema validation skipped (HI-2 unverified)",
+            file=sys.stderr,
+        )
+        return
     schema = json.loads(SCHEMA_PATH.read_text())
     Draft202012Validator(schema).validate(review)
 
 
 def _find_finding(envelopes: dict, finding_id: str):
+    """Find a finding by id across all loaded envelopes; return first match or None.
+
+    Assumes finding_ids are globally unique across analyzer envelopes per the
+    Phase 4 finding_id convention `<source>:<rule_id>:<locator>` (the source
+    prefix differs per analyzer). Iteration order is deterministic via
+    ANALYZER_FILES.
+    """
     for env in envelopes.values():
         for f in env.get("findings", []):
             if f.get("finding_id") == finding_id:
