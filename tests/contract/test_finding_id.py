@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "kicad" / "scripts"))
 
-from finding_schema import _derive_finding_id
+from finding_schema import _derive_finding_id, make_finding
 
 
 def test_derive_finding_id_uses_detection_id_when_present():
@@ -62,3 +62,54 @@ def test_derive_finding_id_normalizes_whitespace_and_case():
         summary="Trace too narrow",
     )
     assert fid == "pcb:TR-001:u3"
+
+
+def test_make_finding_populates_finding_id_from_components():
+    f = make_finding(
+        source="sch",
+        detector="test_detector",
+        rule_id="TEST-001",
+        category="test",
+        severity="warning",
+        confidence="heuristic",
+        evidence_source="topology",
+        summary="Test finding",
+        description="Test description",
+        components=["U7"],
+    )
+    assert f["finding_id"] == "sch:TEST-001:u7"
+
+
+def test_make_finding_populates_finding_id_from_summary_hash():
+    f = make_finding(
+        source="sch",
+        detector="test_detector",
+        rule_id="TEST-002",
+        category="test",
+        severity="warning",
+        confidence="heuristic",
+        evidence_source="topology",
+        summary="A summary with no locators",
+        description="Test description",
+    )
+    assert f["finding_id"].startswith("sch:TEST-002:")
+    locator = f["finding_id"].split(":")[-1]
+    assert len(locator) == 12
+
+
+def test_make_finding_passes_design_context_to_tuning_stub():
+    """Tuning stub should be identity in 4a; severity unchanged."""
+    f = make_finding(
+        source="sch",
+        detector="test_detector",
+        rule_id="AM-001",
+        category="test",
+        severity="warning",
+        confidence="heuristic",
+        evidence_source="topology",
+        summary="Test",
+        description="Test description",
+        components=["U1"],
+        design_context={"environment": "medical"},
+    )
+    assert f["severity"] == "warning"  # stub returns identity

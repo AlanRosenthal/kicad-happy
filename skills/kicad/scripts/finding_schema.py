@@ -85,6 +85,8 @@ def make_finding(
     report_section: str | None = None,
     impact: str | None = None,
     standard_ref: str | None = None,
+    source: str | None = None,            # NEW: analyzer source tag ("sch", "pcb", "emc", ...)
+    design_context: dict | None = None,   # NEW: optional design_context for severity tuning
     **extra,
 ) -> dict:
     """Build a rich finding dict with consistent structure.
@@ -106,6 +108,8 @@ def make_finding(
         raise ValueError(
             f"make_finding: invalid evidence_source {evidence_source!r} "
             f"(valid: {VALID_EVIDENCE_SOURCES})")
+    if design_context is not None:
+        severity = _apply_severity_tuning(rule_id, severity, design_context)
     finding = {
         'detector': detector,
         'rule_id': rule_id,
@@ -129,6 +133,15 @@ def make_finding(
     }
     if extra:
         finding.update(extra)
+    finding['finding_id'] = _derive_finding_id(
+        source=source or "unknown",
+        rule_id=rule_id,
+        detection_id=finding.get('detection_id'),
+        components=components,
+        nets=nets,
+        pins=pins,
+        summary=summary,
+    )
     return finding
 
 

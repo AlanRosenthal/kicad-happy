@@ -148,6 +148,10 @@ class Finding:
                        "Tightens to typed Provenance in v1.5."})
     detection_id: Optional[str] = field(default=None, metadata={
         "description": "Stable per-finding ID for cross-run tracking."})
+    finding_id: Optional[str] = field(default=None, metadata={
+        "description": "Stable cross-run identifier derived in make_finding(). "
+                       "Format: {source}:{detection_id} or {source}:{rule_id}:{locator}. "
+                       "See Phase 4 spec §3.2."})
     stages: Optional[list[str]] = field(default=None, metadata={
         "description": "Review stages this finding applies to: "
                        "'schematic', 'layout', 'pre_fab', 'bring_up'."})
@@ -200,6 +204,10 @@ class Assessment:
         "description": "Evidence provenance (source_file, sha256, extraction_id, ...)."})
     detection_id: Optional[str] = field(default=None, metadata={
         "description": "Stable per-assessment ID for cross-run tracking."})
+    finding_id: Optional[str] = field(default=None, metadata={
+        "description": "Stable cross-run identifier derived in make_finding(). "
+                       "Format: {source}:{detection_id} or {source}:{rule_id}:{locator}. "
+                       "See Phase 4 spec §3.2."})
     extra: Optional[dict] = field(default=None, metadata={
         "description": "Assessment-specific measurement fields (e.g. tj_estimated_c, "
                        "margin_c, pdiss_w for thermal). Free-form for v1.4; tightens "
