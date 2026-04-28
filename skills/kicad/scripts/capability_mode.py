@@ -53,8 +53,9 @@ def _read_schema_versions() -> dict:
         except (json.JSONDecodeError, OSError):
             continue
         title = schema_path.stem.replace(".schema", "")
-        # Schemas store version in $id or top-level "schema_version" property.const
-        sv = (data.get("properties", {}).get("schema_version", {}) or {}).get("const")
+        # Schemas store version in top-level "x-schema-version" key
+        # (refined in 4d-skeleton if additional sources need merging)
+        sv = data.get("x-schema-version")
         if sv:
             versions[title] = sv
     return versions
@@ -92,6 +93,16 @@ def get_or_create_capability_mode(
     analysis_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return record
+
+
+def get_or_create_run_id(analysis_dir, **kwargs) -> str:
+    """Return canonical run_id for analysis_dir, creating capability_mode.json if absent.
+
+    Phase 4 spec §3.1 wiring helper: analyzers call this at the start of main()
+    to align inputs.run_id with the canonical capability_mode.json:run_id.
+    """
+    record = get_or_create_capability_mode(analysis_dir, **kwargs)
+    return record["run_id"]
 
 
 def get_capability_mode_ref(analysis_dir, **kwargs) -> dict:
