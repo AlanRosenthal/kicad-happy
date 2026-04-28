@@ -1,6 +1,5 @@
 """Contract tests for Phase 4 hard invariants HI-1 (immutability),
 HI-3 (strip recovers baseline), HI-5 (finding_id determinism)."""
-import copy
 import json
 import subprocess
 import sys
@@ -92,3 +91,22 @@ def test_hi1_make_finding_returns_independent_lists():
     assert f.get("components") == ["U1"], (
         "HI-1 violation: make_finding aliased the caller's list — "
         "mutating it post-construction changed the finding")
+
+
+def test_hi1_make_finding_returns_independent_nets_list():
+    """HI-1: make_finding doesn't share nets list state with caller.
+
+    Companion to test_hi1_make_finding_returns_independent_lists; covers
+    the nets field separately to guard against future regressions on the
+    list() copy fix in finding_schema.make_finding.
+    """
+    from finding_schema import make_finding
+    caller_nets = ["VCC"]
+    f = make_finding(
+        detector="t", rule_id="HI1-T", category="test",
+        summary="t", description="t",
+        severity="warning", confidence="heuristic", evidence_source="topology",
+        nets=caller_nets, source="sch",
+    )
+    caller_nets.append("GND")
+    assert f["nets"] == ["VCC"], "HI-1 violation: nets list aliased"

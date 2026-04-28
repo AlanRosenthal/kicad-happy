@@ -118,6 +118,11 @@ def make_finding(
         'description': description,
         'components': list(components) if components is not None else [],
         'nets': list(nets) if nets is not None else [],
+        # Note: list(pins) creates a shallow copy. In v1.4, pins items are sometimes
+        # dicts (e.g., {"ref": "U1", "pin": "5"}); mutating those dict elements
+        # post-call still affects the finding's pins. Current production callers
+        # don't mutate pin dicts post-construction, so this is safe today. v1.5
+        # PinRef migration will tighten pins to a typed structure and revisit this.
         'pins': list(pins) if pins is not None else [],
         'severity': severity,
         'confidence': confidence,
