@@ -35,6 +35,15 @@ from detector_helpers import (
 )
 from signal_detectors import _get_net_components
 from finding_schema import make_finding, make_provenance
+from lookup_helpers import get_facts
+
+try:
+    from datasheet_types import has_data as _ds_has_data, best as _ds_best
+    _HAS_DS_TYPES = True
+except ImportError:
+    _HAS_DS_TYPES = False
+    def _ds_has_data(specs): return False  # type: ignore[misc]
+    def _ds_best(specs, *, min_confidence): return None  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -174,8 +183,13 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
     ics = get_unique_ics(ctx)
     checked_nets: set[str] = set()
 
+    cache_dir = getattr(ctx, 'cache_dir', None)
+    design_context = getattr(ctx, 'design_context', None)
+
     for ic in ics:
         ref = ic['reference']
+        mpn = ic.get('mpn') or ic.get('value') or ''
+        facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
         pins = ctx.ref_pins.get(ref, {})
 
         for pnum, (net, _) in pins.items():
@@ -224,6 +238,29 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
             checked_nets.add(net)
 
             if needs_pullup:
+                # Datasheet path: if facts has recommended_pullup_range, use it.
+                # Heuristic path: fall back to _PULLUP_MIN/MAX_OHMS (always fires
+                # in v1.4 — no extracted MPN carries recommended_pullup_range yet;
+                # 4d-active populates ctx.cache_dir to activate datasheet path).
+                ds_range = None
+                if facts is not None:
+                    _specs = getattr(
+                        getattr(facts, 'base', None), 'recommended_pullup_range', None
+                    )
+                    if _ds_has_data(_specs):
+                        ds_range = _ds_best(_specs, min_confidence='medium')
+
+                if ds_range is not None:
+                    pu_confidence = 'datasheet-backed'
+                    pu_evidence = 'datasheet'
+                    pu_min = ds_range.min if hasattr(ds_range, 'min') else _PULLUP_MIN_OHMS
+                    pu_max = ds_range.max if hasattr(ds_range, 'max') else _PULLUP_MAX_OHMS
+                else:
+                    pu_confidence = 'heuristic'
+                    pu_evidence = 'topology'
+                    pu_min = _PULLUP_MIN_OHMS
+                    pu_max = _PULLUP_MAX_OHMS
+
                 pullups = _find_pullups_on_net(ctx, net, resistor_nets, net_to_resistors)
                 if not pullups:
                     # Check if another driver exists (push-pull output driving it)
@@ -242,8 +279,8 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                             f'to a power rail for correct operation.'
                         ),
                         severity='warning',
-                        confidence='heuristic',
-                        evidence_source='topology',
+                        confidence=pu_confidence,
+                        evidence_source=pu_evidence,
                         components=[ref],
                         nets=[net],
                         pins=[{'ref': ref, 'pin': pin_name, 'function': 'open_drain_or_input'}],
@@ -257,13 +294,14 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                         report_section='Signal Integrity',
                         impact='Pin may float or bus may not function without pull-up',
                         provenance=make_provenance('pu_missing_pullup', 'deterministic'),
-                    
+                        design_context=design_context,
+                        schema_era='v1.4',
                         source=ctx.source,))
                 else:
                     # Check pull-up value range
                     for pu in pullups:
                         if pu['ohms'] is not None:
-                            if pu['ohms'] < _PULLUP_MIN_OHMS:
+                            if pu['ohms'] < pu_min:
                                 findings.append(make_finding(
                                     detector='validate_pullups',
                                     rule_id='PU-001',
@@ -272,19 +310,20 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                                     description=(
                                         f'Pull-up {pu["ref"]} on net {net} has value '
                                         f'{pu["ohms"]:.0f} ohms, which is below the typical '
-                                        f'minimum of {_PULLUP_MIN_OHMS} ohms. This draws '
+                                        f'minimum of {pu_min} ohms. This draws '
                                         f'excessive current when the output is low.'
                                     ),
                                     severity='info',
-                                    confidence='heuristic',
-                                    evidence_source='topology',
+                                    confidence=pu_confidence,
+                                    evidence_source=pu_evidence,
                                     components=[ref, pu['ref']],
                                     nets=[net],
                                     recommendation=f'Consider increasing {pu["ref"]} to 4.7k-10k.',
                                     provenance=make_provenance('pu_value_check', 'deterministic'),
-                                
+                                    design_context=design_context,
+                                    schema_era='v1.4',
                                     source=ctx.source,))
-                            elif pu['ohms'] > _PULLUP_MAX_OHMS:
+                            elif pu['ohms'] > pu_max:
                                 findings.append(make_finding(
                                     detector='validate_pullups',
                                     rule_id='PU-001',
@@ -293,17 +332,18 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                                     description=(
                                         f'Pull-up {pu["ref"]} on net {net} has value '
                                         f'{pu["ohms"]/1000:.0f}k ohms, which is above the typical '
-                                        f'maximum of {_PULLUP_MAX_OHMS/1000:.0f}k ohms. The signal '
+                                        f'maximum of {pu_max/1000:.0f}k ohms. The signal '
                                         f'rise time may be too slow for reliable operation.'
                                     ),
                                     severity='info',
-                                    confidence='heuristic',
-                                    evidence_source='topology',
+                                    confidence=pu_confidence,
+                                    evidence_source=pu_evidence,
                                     components=[ref, pu['ref']],
                                     nets=[net],
                                     recommendation=f'Consider decreasing {pu["ref"]} to 4.7k-10k.',
                                     provenance=make_provenance('pu_weak_pullup', 'deterministic'),
-                                
+                                    design_context=design_context,
+                                    schema_era='v1.4',
                                     source=ctx.source,))
 
             if needs_pulldown:
@@ -335,7 +375,8 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                         report_section='Signal Integrity',
                         impact='Pin floats at startup, undefined behavior',
                         provenance=make_provenance('pu_missing_pullup', 'deterministic'),
-                    
+                        design_context=design_context,
+                        schema_era='v1.4',
                         source=ctx.source,))
 
     return findings
