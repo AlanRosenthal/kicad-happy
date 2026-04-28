@@ -1206,7 +1206,7 @@ def validate_crystal_load_caps(
                 f'Adjust load capacitors so CL_eff = (C1*C2)/(C1+C2) + C_stray ≈ {tgt_str}. '
                 f'Typical C_stray is 3-5pF.'
             ),
-            provenance=make_provenance('xtal_load_cap_check', 'heuristic'),
+            provenance=make_provenance('xtal_load_cap_check', xt_confidence),
             design_context=design_context,
             schema_era='v1.4',
             source=ctx.source,
