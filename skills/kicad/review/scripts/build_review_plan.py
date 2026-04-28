@@ -12,9 +12,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-
-
 def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -22,10 +19,11 @@ def _now_iso():
 def build_plan(analysis_dir):
     """Build a 2-task review plan: design_context + reviewer."""
     analysis_dir = Path(analysis_dir)
+    now = _now_iso()
     plan = {
         "schema_version": "1.0",
-        "plan_id": f"review-{_now_iso()}",
-        "created_at": _now_iso(),
+        "plan_id": f"review-{now}",
+        "created_at": now,
         "purpose": "phase4_review",
         "tasks": [
             {
