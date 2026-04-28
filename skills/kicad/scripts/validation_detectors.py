@@ -1271,8 +1271,8 @@ def validate_feedback_stability(
         if not mpn:
             comp_entry = ctx.comp_lookup.get(ref)
             mpn = (comp_entry.get('mpn') if comp_entry else '') or ''
-        _facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
-        # _facts probe is informational — confidence stays heuristic regardless.
+        facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
+        # facts probe is informational — confidence stays heuristic regardless.
 
         if parallel_impedance < _FB_IMPEDANCE_MIN:
             findings.append(make_finding(

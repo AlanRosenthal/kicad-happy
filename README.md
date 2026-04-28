@@ -494,6 +494,24 @@ Three analyzer-side guarantees that Phase 4's Layer 2 review pipeline depends on
 
 **Dispatcher recipe addendum:** `dispatch-claude-code.md` Phase 4 addendum routes `task_type: "review"` to review prompts.
 
+### Phase 4b — 5 Upgraded Detectors (CLOSED 2026-04-28)
+
+Five existing detectors now consume v1.4 datasheet facts via the Phase 2 Consumer API `lookup()`, with soft-fallback to existing v1.3 heuristics. Single shared helper module `skills/kicad/scripts/lookup_helpers.py` centralizes `get_facts(mpn, cache_dir)` and re-exports `has_data` / `best` from `datasheet_types` so consuming detectors stay path-clean.
+
+| Rule | Datasheet field | Heuristic fallback | Notes |
+|------|-----------------|--------------------|-------|
+| **PU-001** pull-up value | `base.recommended_pullup_range` | `_PULLUP_MIN/MAX_OHMS` (1k–100k) + I2C/SWD heuristics | Field not yet in base schema; v1.5 |
+| **LR-001** LED resistor | `diode.vf` + `diode.if_max` | `_LED_VF_BY_COLOR` + 20mA default | DiodeBlock dataclass v1.5 |
+| **XT-001** crystal load cap | `crystal.load_capacitance` | 18pF nominal + value-string parse | CrystalBlock dataclass v1.5; new `validate_crystal_load_caps` validator |
+| **FS-001** feedback stability | `regulator.cout_min` + `stability_conditions.esr_range` | `_FB_IMPEDANCE_MIN/MAX` + comp-required keyword list | Regulator IS wired; probe informational today (validation logic v1.5) |
+| **VM-001** voltage mismatch | `base.recommended_operating.{VDD,VCC}` | `_estimate_rail_voltage_for_ic` + EN-pin shortcut via `get_regulator_features` | Probe informational today (validation logic v1.5); existing EN-pin datasheet integration preserved |
+
+Each detector emits `confidence: "datasheet-backed"` + `evidence_source: "datasheet"` when facts populate the lookup field, falling back to existing `confidence: "heuristic"` + `evidence_source: "topology"` (or `"heuristic_rule"`) when absent or below the medium trust gate. Every finding tagged `schema_era: "v1.4"` for harness regression assertions. `design_context` threaded into every emit site for severity tuning by `_apply_severity_tuning()` per the 4d-skeleton matrix.
+
+`AnalysisContext.cache_dir` and `AnalysisContext.design_context` are read via `getattr(ctx, ..., None)` — those fields aren't yet on the dataclass; 4d-active wires them through `analyze_schematic.py`. Soft-fallback semantics mean detectors gracefully heuristic-only today and activate the datasheet branch automatically once 4d-active populates the context.
+
+9 commits on `v1.4-dev`; 423 contract tests green (390 → 423, +33 new).
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.
