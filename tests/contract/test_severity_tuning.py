@@ -69,3 +69,29 @@ def test_apply_tuning_ignores_unknown_rule_id():
     dc = {"environment": "medical"}
     result = _apply_severity_tuning("UNKNOWN-999", "warning", dc)
     assert result == "warning"  # unknown rules pass through unchanged
+
+
+def test_tuning_rule_ids_match_phase4_detector_set():
+    """Closure check: severity_tuning.json must list exactly the 11 rule_ids
+    that 4b/4c will emit. Catches accidental drift between spec §4.4 and impl."""
+    data = json.loads(TUNING_PATH.read_text())
+    expected_rule_ids = {
+        # Phase 4 4b upgrades (5)
+        "PU-001", "LR-001", "XT-001", "FS-001", "VM-001",
+        # Phase 4 4c new (6)
+        "AM-001", "OV-001", "TJ-001", "FT-001", "PM-001", "EX-001",
+    }
+    assert set(data["rules"].keys()) == expected_rule_ids
+
+
+def test_tuning_max_severity_never_below_base_severity():
+    """Sanity: tuning_max_severity must be >= base_severity for every rule."""
+    severity_order = ("info", "warning", "error")
+    data = json.loads(TUNING_PATH.read_text())
+    for rule_id, rule in data["rules"].items():
+        base_idx = severity_order.index(rule["base_severity"])
+        max_idx = severity_order.index(rule["tuning_max_severity"])
+        assert max_idx >= base_idx, (
+            f"{rule_id}: tuning_max_severity ({rule['tuning_max_severity']}) "
+            f"< base_severity ({rule['base_severity']})"
+        )
