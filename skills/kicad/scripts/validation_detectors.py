@@ -1005,8 +1005,33 @@ def validate_led_resistors(ctx: AnalysisContext) -> list[dict]:
     resistors = get_components_by_type(ctx, 'resistor')
     resistor_nets, net_to_resistors = index_two_pin_components(ctx, resistors)
 
+    cache_dir = getattr(ctx, 'cache_dir', None)
+    design_context = getattr(ctx, 'design_context', None)
+
     for led in leds:
         ref = led['reference']
+        mpn = led.get('mpn') or led.get('value') or ''
+        facts = get_facts(mpn, cache_dir=cache_dir) if mpn else None
+
+        # Probe diode.vf and diode.if_max from datasheet facts.
+        # DatasheetFacts.diode does not exist in v1.4 (DiodeBlock is v1.5 expansion),
+        # so _vf_specs and _if_specs will always be None today — heuristic always fires.
+        # The wiring activates automatically once DiodeBlock lands in v1.5 / 4d-active.
+        _vf_specs = getattr(getattr(facts, 'diode', None), 'vf', None)
+        _if_specs = getattr(getattr(facts, 'diode', None), 'if_max', None)
+
+        ds_vf = best(_vf_specs, min_confidence='medium') if has_data(_vf_specs) else None
+        ds_if = best(_if_specs, min_confidence='medium') if has_data(_if_specs) else None
+
+        # If either Vf or If is datasheet-backed, treat the whole finding as datasheet-backed.
+        # Per-field fallback is handled below when computing the actual values.
+        if ds_vf is not None or ds_if is not None:
+            lr_confidence = 'datasheet-backed'
+            lr_evidence = 'datasheet'
+        else:
+            lr_confidence = 'heuristic'
+            lr_evidence = 'topology'
+
         n1, n2 = ctx.get_two_pin_nets(ref)
         if not n1 or not n2:
             continue
@@ -1050,18 +1075,30 @@ def validate_led_resistors(ctx: AnalysisContext) -> list[dict]:
                     detector='validate_led_resistors', rule_id='LR-001', category='component_integrity',
                     summary=f'LED {ref}: no current-limiting resistor found',
                     description=f'LED {ref} ({led.get("value", "")}) has no series current-limiting resistor.',
-                    severity='error', confidence='heuristic', evidence_source='topology',
+                    severity='error', confidence=lr_confidence, evidence_source=lr_evidence,
                     components=[ref], nets=[n for n in (n1, n2) if n],
                     recommendation='Add a current-limiting resistor (typically 330R-1k for 3.3V).',
                     fix_params={'type': 'add_component', 'components': [{'type': 'resistor', 'value': '330', 'net_from': n1, 'net_to': n2}], 'basis': 'LED requires series current limiting'},
                     impact='LED overcurrent causes failure',
                     provenance=make_provenance('lr_resistor_check', 'deterministic'),
-                
+                    design_context=design_context,
+                    schema_era='v1.4',
                     source=ctx.source,))
             continue
 
         color = _guess_led_color(led.get('value', ''), led.get('lib_id', ''))
-        vf = _LED_VF_BY_COLOR.get(color, _LED_VF_DEFAULT) if color else _LED_VF_DEFAULT
+        # Use datasheet Vf (typ) if available; fall back to color-heuristic or default.
+        if ds_vf is not None and ds_vf.typ is not None:
+            vf = ds_vf.typ
+        else:
+            vf = _LED_VF_BY_COLOR.get(color, _LED_VF_DEFAULT) if color else _LED_VF_DEFAULT
+        # Use datasheet If_max (max, else typ) if available; fall back to constant.
+        if ds_if is not None and ds_if.max is not None:
+            if_max_ma = ds_if.max * 1000  # SpecValue in amps → mA
+        elif ds_if is not None and ds_if.typ is not None:
+            if_max_ma = ds_if.typ * 1000
+        else:
+            if_max_ma = _LED_IF_MAX_DEFAULT_MA
 
         for sr in series_resistors:
             rail_v = parse_voltage_from_net_name(sr['rail'])
@@ -1069,18 +1106,19 @@ def validate_led_resistors(ctx: AnalysisContext) -> list[dict]:
                 continue
             current_ma = (rail_v - vf) / sr['ohms'] * 1000
 
-            if current_ma > _LED_IF_MAX_DEFAULT_MA * 2:
+            if current_ma > if_max_ma * 2:
                 findings.append(make_finding(
                     detector='validate_led_resistors', rule_id='LR-001', category='component_integrity',
                     summary=f'LED {ref}: current too high ({current_ma:.0f}mA via {sr["ref"]})',
-                    description=f'LED {ref} draws ~{current_ma:.0f}mA through {sr["ref"]} ({sr["ohms"]:.0f}R) from {sr["rail"]} ({rail_v}V). Exceeds typical {_LED_IF_MAX_DEFAULT_MA}mA max.',
-                    severity='warning', confidence='heuristic', evidence_source='topology',
+                    description=f'LED {ref} draws ~{current_ma:.0f}mA through {sr["ref"]} ({sr["ohms"]:.0f}R) from {sr["rail"]} ({rail_v}V). Exceeds typical {if_max_ma:.0f}mA max.',
+                    severity='warning', confidence=lr_confidence, evidence_source=lr_evidence,
                     components=[ref, sr['ref']], nets=[n for n in (n1, n2) if n],
                     recommendation=f'Increase {sr["ref"]} to {(rail_v - vf) / (_LED_IF_RECOMMENDED_MA / 1000):.0f}R for ~{_LED_IF_RECOMMENDED_MA}mA.',
                     fix_params={'type': 'resistor_value_change', 'component': sr['ref'], 'current_value': sr['ohms'], 'target_metric': 'led_current_mA', 'target_value': _LED_IF_RECOMMENDED_MA, 'actual_value': current_ma, 'formula': f'R = (Vrail - Vf) / Iled = ({rail_v} - {vf}) / {_LED_IF_RECOMMENDED_MA/1000}'},
                     impact='LED overcurrent reduces lifespan',
                     provenance=make_provenance('lr_resistor_check', 'deterministic'),
-                
+                    design_context=design_context,
+                    schema_era='v1.4',
                     source=ctx.source,))
 
             power_w = (current_ma / 1000) ** 2 * sr['ohms']
@@ -1089,11 +1127,12 @@ def validate_led_resistors(ctx: AnalysisContext) -> list[dict]:
                     detector='validate_led_resistors', rule_id='LR-001', category='component_integrity',
                     summary=f'LED resistor {sr["ref"]}: power dissipation {power_w*1000:.0f}mW',
                     description=f'Resistor {sr["ref"]} dissipates {power_w*1000:.0f}mW. Exceeds 250mW typical for small packages.',
-                    severity='info', confidence='heuristic', evidence_source='topology',
+                    severity='info', confidence=lr_confidence, evidence_source=lr_evidence,
                     components=[sr['ref']],
                     recommendation='Use a larger package resistor or increase resistance.',
                     provenance=make_provenance('lr_resistor_check', 'deterministic'),
-                
+                    design_context=design_context,
+                    schema_era='v1.4',
                     source=ctx.source,))
 
     return findings
