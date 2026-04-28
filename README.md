@@ -510,7 +510,7 @@ Each detector emits `confidence: "datasheet-backed"` + `evidence_source: "datash
 
 `AnalysisContext.cache_dir` and `AnalysisContext.design_context` are read via `getattr(ctx, ..., None)` — those fields aren't yet on the dataclass; 4d-active wires them through `analyze_schematic.py`. Soft-fallback semantics mean detectors gracefully heuristic-only today and activate the datasheet branch automatically once 4d-active populates the context.
 
-9 commits on `v1.4-dev`; 423 contract tests green (390 → 423, +33 new).
+11 commits on `v1.4-dev`; 423 contract tests green (390 → 423, +33 new).
 
 ## 🎯 v1.3 — Harmonized Analysis
 
