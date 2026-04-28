@@ -9,3 +9,8 @@ CLAUDE.md
 .venv/
 test-output/
 docs/
+
+# Phase 4 fixture (real corpus project + analysis outputs; gitignored per
+# Phase 4 design spec §11; the exercise runner is committed but the fixture
+# project + its analysis/ outputs are not)
+/tests/fixtures/phase4-review/
