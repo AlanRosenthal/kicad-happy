@@ -384,3 +384,81 @@ def detect_tj_exceeds_max(assessments, *, source, cache_dir,
             ambient_c=ambient,
         ))
     return findings
+
+
+# ---------------------------------------------------------------------------
+# FT-001 — 5V signal on non-5V-tolerant pin
+# ---------------------------------------------------------------------------
+
+# Threshold below which a net voltage is considered safe even on a non-tolerant
+# pin. Anything ≥ this triggers FT-001 when pin.is_5v_tolerant is False.
+_FT_001_THRESHOLD_V = 4.5
+
+
+def detect_5v_on_non_tolerant_pin(ctx, rail_voltages: dict) -> list[dict]:
+    """FT-001: For each IC pin where Pin.is_5v_tolerant is False, check the
+    connected net voltage. Emit error when net ≥ 5V threshold.
+
+    Pin.is_5v_tolerant=None (unknown) is treated as no-finding (skip silent)
+    per Pin schema convention. Severity: error.
+    """
+    findings: list[dict] = []
+    cache_dir = getattr(ctx, "cache_dir", None)
+    design_context = getattr(ctx, "design_context", None)
+
+    for component in ctx.components:
+        ref = component.get("reference") or component.get("ref")
+        mpn = _component_mpn(component)
+        if not ref or not mpn:
+            continue
+        facts = get_facts(mpn, cache_dir=cache_dir)
+        if facts is None:
+            continue
+        base = getattr(facts, "base", None)
+        if base is None:
+            continue
+        pinout = getattr(base, "pinout", None)
+        if pinout is None:
+            continue
+
+        for pin in pinout:
+            tolerant = getattr(pin, "is_5v_tolerant", None)
+            if tolerant is None or tolerant is True:
+                continue  # Skip unknown (None) and explicitly tolerant pins.
+            net = _connected_net(ctx, ref, getattr(pin, "numbers", []))
+            if net is None:
+                continue
+            sig_v = rail_voltages.get(net)
+            if sig_v is None or sig_v < _FT_001_THRESHOLD_V:
+                continue
+
+            pin_number = pin.numbers[0] if pin.numbers else "?"
+            findings.append(make_finding(
+                detector="detect_5v_on_non_tolerant_pin",
+                rule_id="FT-001",
+                category="electrical_safety",
+                summary=(f"{ref} pin {pin_number} ({pin.name}) on {net} sees "
+                          f"{sig_v}V but is not 5V-tolerant"),
+                description=(f"Pin {pin_number} of {ref} ({mpn}) is connected "
+                              f"to net {net} at an estimated {sig_v}V. The "
+                              f"datasheet marks this pin as NOT 5V-tolerant — "
+                              f"applying 5V can damage the input or violate "
+                              f"absolute-max ratings."),
+                severity="error",
+                confidence="datasheet-backed",
+                evidence_source="datasheet",
+                components=[ref],
+                nets=[net],
+                pins=[{"ref": ref, "pin": pin_number, "name": pin.name}],
+                recommendation=(f"Insert a level shifter, voltage divider, or "
+                                 f"current-limiting resistor between {net} and "
+                                 f"pin {pin_number} ({pin.name})."),
+                report_section="Electrical Safety",
+                impact="Risk of permanent input damage from over-voltage signal.",
+                source=ctx.source,
+                design_context=design_context,
+                schema_era="v1.4",
+                signal_voltage=sig_v,
+                is_5v_tolerant=False,
+            ))
+    return findings
