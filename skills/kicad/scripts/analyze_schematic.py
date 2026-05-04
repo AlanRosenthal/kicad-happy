@@ -125,6 +125,9 @@ from validation_detectors import (
     validate_feedback_stability,
     validate_crystal_load_caps,
 )
+from lookup_detectors import (
+    detect_absolute_max_violations,
+)
 from finding_schema import compute_trust_summary, sort_findings
 from envelopes.schematic import SchematicEnvelope
 from schema_codec import emit_schema
@@ -792,6 +795,11 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
     feedback_stability_findings = validate_feedback_stability(ctx, power_regulators)
     crystal_load_findings = validate_crystal_load_caps(ctx, crystal_circuits)
 
+    # Lookup detectors (Phase 4c) — consume v1.4 datasheet facts via lookup().
+    # Soft-skip when get_facts() returns None (no MPN cache). Synonym-resolved
+    # rail keys per addendum §A2; per-pin Pin.absolute_max overrides rail-level.
+    am_001_findings = detect_absolute_max_violations(ctx, rail_voltages)
+
     # New domain detectors (rich format)
     wireless_modules = detect_wireless_modules(ctx)
     transformer_feedback = detect_transformer_feedback(ctx)
@@ -1017,6 +1025,9 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
             led_resistor_findings +
             feedback_stability_findings +
             crystal_load_findings
+        ),
+        "lookup_findings": (
+            am_001_findings
         ),
     }
 
