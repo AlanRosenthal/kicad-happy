@@ -37,7 +37,8 @@ log = logging.getLogger(__name__)
 # Synonym tables for rail-key resolution. Order matters: first match wins.
 VDD_SYNONYMS = ("VDD", "VCC", "VDDA", "VDDIO", "VCC_dual_supply",
                 "VCC_single_supply", "VDDD", "AVDD", "DVDD")
-TJ_SYNONYMS = ("TJ", "TJ_max", "TJmax")
+TJ_SYNONYMS = ("TJ", "TJ_max", "TJmax", "Tj", "Tj_max")
+THETA_JA_SYNONYMS = ("theta_ja", "Rtheta_JA", "R_theta_JA", "RthJA")
 
 
 def _resolve_key(block: Optional[dict], synonyms) -> Optional[list]:
@@ -293,4 +294,93 @@ def detect_vcc_outside_recommended(ctx, rail_voltages: dict) -> list[dict]:
                     recommended_max=v_max,
                     domain=domain,
                 ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# TJ-001 — junction temperature exceeds TJmax (thermal)
+# ---------------------------------------------------------------------------
+
+def detect_tj_exceeds_max(assessments, *, source, cache_dir,
+                            design_context=None) -> list[dict]:
+    """TJ-001: Recompute junction temperature using v1.4 facts.base.thermal
+    [theta_ja] and compare to facts.base.absolute_max[TJ_SYNONYMS].
+
+    Severity: error.
+
+    Each assessment must carry: ref, value (or mpn), ambient_c, pdiss_w.
+    Existing v1.3 thermal pipeline (analyze_thermal._compute_junction_temps)
+    populates these fields; TJ-001 is an additive rule on top.
+    """
+    findings: list[dict] = []
+    for a in assessments:
+        ref = a.get("ref")
+        mpn = a.get("mpn") or a.get("value")
+        if not ref or not mpn:
+            continue
+        facts = get_facts(mpn, cache_dir=cache_dir)
+        if facts is None:
+            continue
+        base = getattr(facts, "base", None)
+        if base is None:
+            continue
+
+        thermal_block = getattr(base, "thermal", None)
+        theta_specs = _resolve_key(thermal_block, THETA_JA_SYNONYMS)
+        if not has_data(theta_specs):
+            continue
+        theta_sv = best(theta_specs, min_confidence="medium")
+        if theta_sv is None:
+            continue
+        # Prefer typ; fall back to max (worst-case) when typ is absent.
+        theta = theta_sv.typ if theta_sv.typ is not None else theta_sv.max
+        if theta is None:
+            continue
+
+        am_block = getattr(base, "absolute_max", None)
+        tj_specs = _resolve_key(am_block, TJ_SYNONYMS)
+        if not has_data(tj_specs):
+            continue
+        tj_sv = best(tj_specs, min_confidence="medium")
+        if tj_sv is None or tj_sv.max is None:
+            continue
+        tj_max = tj_sv.max
+
+        ambient = a.get("ambient_c", 25.0)
+        pdiss = a.get("pdiss_w", 0.0)
+        tj_v14 = ambient + theta * pdiss
+
+        if tj_v14 <= tj_max:
+            continue
+
+        findings.append(make_finding(
+            detector="detect_tj_exceeds_max",
+            rule_id="TJ-001",
+            category="thermal",
+            summary=(f"{ref} ({mpn}) estimated TJ {tj_v14:.1f}°C exceeds "
+                      f"datasheet TJmax {tj_max}°C"),
+            description=(f"Component {ref} ({mpn}): TJ = ambient ({ambient}°C) + "
+                          f"θJA ({theta}°C/W) × P_diss ({pdiss}W) = {tj_v14:.1f}°C, "
+                          f"exceeding datasheet TJmax of {tj_max}°C. "
+                          f"Operation may cause thermal shutdown, accelerated "
+                          f"aging, or permanent damage."),
+            severity="error",
+            confidence="datasheet-backed",
+            evidence_source="datasheet",
+            components=[ref],
+            recommendation=(f"Reduce P_diss below "
+                             f"{(tj_max - ambient) / theta:.2f}W, improve PCB "
+                             f"thermal path (more copper, vias, or heat-sinking), "
+                             f"or select a part with a higher TJmax / lower θJA."),
+            report_section="Thermal",
+            impact="Risk of thermal shutdown or accelerated device aging.",
+            source=source,
+            design_context=design_context,
+            schema_era="v1.4",
+            tj_estimated_c=round(tj_v14, 1),
+            tj_max_c=tj_max,
+            theta_ja=theta,
+            pdiss_w=pdiss,
+            ambient_c=ambient,
+        ))
     return findings
