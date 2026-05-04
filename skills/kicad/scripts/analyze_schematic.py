@@ -129,6 +129,8 @@ from lookup_detectors import (
     detect_absolute_max_violations,
     detect_vcc_outside_recommended,
     detect_5v_on_non_tolerant_pin,
+    detect_wrong_signal_type,
+    detect_missing_required_components,
 )
 from finding_schema import compute_trust_summary, sort_findings
 from envelopes.schematic import SchematicEnvelope
@@ -803,6 +805,8 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
     am_001_findings = detect_absolute_max_violations(ctx, rail_voltages)
     ov_001_findings = detect_vcc_outside_recommended(ctx, rail_voltages)
     ft_001_findings = detect_5v_on_non_tolerant_pin(ctx, rail_voltages)
+    pm_001_findings = detect_wrong_signal_type(ctx)
+    ex_001_findings = detect_missing_required_components(ctx, power_regulators)
 
     # New domain detectors (rich format)
     wireless_modules = detect_wireless_modules(ctx)
@@ -1033,7 +1037,9 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
         "lookup_findings": (
             am_001_findings +
             ov_001_findings +
-            ft_001_findings
+            ft_001_findings +
+            pm_001_findings +
+            ex_001_findings
         ),
     }
 

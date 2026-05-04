@@ -462,3 +462,241 @@ def detect_5v_on_non_tolerant_pin(ctx, rail_voltages: dict) -> list[dict]:
                 is_5v_tolerant=False,
             ))
     return findings
+
+
+# ---------------------------------------------------------------------------
+# PM-001 — pin signal type mismatch
+# ---------------------------------------------------------------------------
+
+# Map peripheral hint regex → set of acceptable peripheral name fragments on
+# AltFunction.peripheral / .name. A net name matching the regex requires
+# the connected pin's alt_functions to include at least one matching peripheral.
+import re as _re
+
+_PERIPHERAL_HINTS = (
+    (_re.compile(r"\b(USART|UART)\d*", _re.IGNORECASE), ("USART", "UART")),
+    (_re.compile(r"\bI2C\d*", _re.IGNORECASE), ("I2C",)),
+    (_re.compile(r"\bSPI\d*", _re.IGNORECASE), ("SPI",)),
+    (_re.compile(r"\bCAN\d*", _re.IGNORECASE), ("CAN",)),
+    (_re.compile(r"\bUSB", _re.IGNORECASE), ("USB",)),
+    (_re.compile(r"\bI2S\d*", _re.IGNORECASE), ("I2S",)),
+)
+
+
+def _infer_peripheral(net_name: str) -> Optional[tuple]:
+    """Return the peripheral-name tuple if net_name matches a known hint."""
+    if not net_name:
+        return None
+    for pat, peripherals in _PERIPHERAL_HINTS:
+        if pat.search(net_name):
+            return peripherals
+    return None
+
+
+def detect_wrong_signal_type(ctx) -> list[dict]:
+    """PM-001: For each IC pin connected to a net whose name suggests a
+    specific peripheral (UART/I2C/SPI/USB/CAN/I2S), verify the pin's
+    Pin.alt_functions includes at least one matching peripheral.
+
+    Skipped silently when alt_functions is empty (datasheet didn't publish
+    the pinout's peripheral mapping). Severity: warning.
+    """
+    findings: list[dict] = []
+    cache_dir = getattr(ctx, "cache_dir", None)
+    design_context = getattr(ctx, "design_context", None)
+
+    for component in ctx.components:
+        ref = component.get("reference") or component.get("ref")
+        mpn = _component_mpn(component)
+        if not ref or not mpn:
+            continue
+        facts = get_facts(mpn, cache_dir=cache_dir)
+        if facts is None:
+            continue
+        base = getattr(facts, "base", None)
+        if base is None:
+            continue
+        pinout = getattr(base, "pinout", None)
+        if pinout is None:
+            continue
+
+        for pin in pinout:
+            alt_functions = getattr(pin, "alt_functions", None) or []
+            if not alt_functions:
+                continue  # No published mapping — can't validate.
+            net = _connected_net(ctx, ref, getattr(pin, "numbers", []))
+            if net is None:
+                continue
+            inferred = _infer_peripheral(net)
+            if inferred is None:
+                continue
+            # Pin supports the peripheral if any AltFunction's peripheral or
+            # name contains a matching family fragment.
+            supported = False
+            for af in alt_functions:
+                af_peripheral = (getattr(af, "peripheral", "") or "").upper()
+                af_name = (getattr(af, "name", "") or "").upper()
+                for hint in inferred:
+                    hint_upper = hint.upper()
+                    if hint_upper in af_peripheral or hint_upper in af_name:
+                        supported = True
+                        break
+                if supported:
+                    break
+            if supported:
+                continue
+
+            pin_number = pin.numbers[0] if pin.numbers else "?"
+            af_names = [getattr(af, "name", "?") for af in alt_functions]
+            findings.append(make_finding(
+                detector="detect_wrong_signal_type",
+                rule_id="PM-001",
+                category="design_intent",
+                summary=(f"{ref} pin {pin_number} ({pin.name}) on {net} expects "
+                          f"{inferred[0]} but pin only supports {af_names}"),
+                description=(f"Net name '{net}' suggests {inferred[0]} signal "
+                              f"function, but pin {pin_number} of {ref} ({mpn}) "
+                              f"alternate-function table only lists: {af_names}. "
+                              f"Either rename the net or move to a pin that "
+                              f"supports the intended peripheral."),
+                severity="warning",
+                confidence="datasheet-backed",
+                evidence_source="datasheet",
+                components=[ref],
+                nets=[net],
+                pins=[{"ref": ref, "pin": pin_number, "name": pin.name}],
+                recommendation=(f"Verify the schematic intent for net {net}. If "
+                                 f"the {inferred[0]} routing is intentional, "
+                                 f"reassign to a pin that supports it."),
+                report_section="Design Intent",
+                impact="Likely net-naming error or incorrect pin assignment.",
+                source=ctx.source,
+                design_context=design_context,
+                schema_era="v1.4",
+                inferred_peripheral=inferred[0],
+                supported_alt_functions=af_names,
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# EX-001 — missing required component (regulator passives)
+# ---------------------------------------------------------------------------
+
+def _net_has_component_type(ctx, net: str, comp_type: str) -> bool:
+    """True iff any component of comp_type ('capacitor', 'inductor', etc.)
+    is connected to `net`."""
+    if not net:
+        return False
+    net_info = ctx.nets.get(net) or {}
+    for pin_info in net_info.get("pins", []):
+        comp_ref = pin_info.get("component")
+        if not comp_ref:
+            continue
+        comp = ctx.comp_lookup.get(comp_ref) or {}
+        if comp.get("type") == comp_type:
+            return True
+    return False
+
+
+def detect_missing_required_components(ctx, power_regulators: list) -> list[dict]:
+    """EX-001: For each regulator with mpn-backed v1.4 facts, verify that
+    datasheet-required components are present:
+      - regulator.cin_min populated → expect a capacitor on input_rail
+      - regulator.cout_min populated → expect a capacitor on output_rail
+      - regulator.inductor_range populated → expect an inductor in the topology
+
+    Severity: error. Soft-skip when no MPN, no facts, or the relevant rail
+    is unknown (input_rail/output_rail is None on the regulator dict).
+    """
+    findings: list[dict] = []
+    cache_dir = getattr(ctx, "cache_dir", None)
+    design_context = getattr(ctx, "design_context", None)
+
+    for reg in power_regulators:
+        ref = reg.get("ref") or reg.get("reference")
+        mpn = reg.get("mpn") or reg.get("value")
+        if not ref or not mpn:
+            continue
+        facts = get_facts(mpn, cache_dir=cache_dir)
+        if facts is None:
+            continue
+        regulator = getattr(facts, "regulator", None)
+        if regulator is None:
+            continue
+
+        input_rail = reg.get("input_rail")
+        output_rail = reg.get("output_rail")
+
+        # Cin check
+        cin_specs = getattr(regulator, "cin_min", None)
+        if has_data(cin_specs) and input_rail:
+            sv = best(cin_specs, min_confidence="medium")
+            if sv is not None and not _net_has_component_type(ctx, input_rail, "capacitor"):
+                findings.append(_make_ex_001(
+                    ref, mpn, "input cap", input_rail, sv,
+                    "regulator.cin_min", ctx.source, design_context,
+                    f"Add a {sv.min}F (min) input capacitor between {input_rail} and ground."
+                ))
+
+        # Cout check
+        cout_specs = getattr(regulator, "cout_min", None)
+        if has_data(cout_specs) and output_rail:
+            sv = best(cout_specs, min_confidence="medium")
+            if sv is not None and not _net_has_component_type(ctx, output_rail, "capacitor"):
+                findings.append(_make_ex_001(
+                    ref, mpn, "output cap", output_rail, sv,
+                    "regulator.cout_min", ctx.source, design_context,
+                    f"Add a {sv.min}F (min) output capacitor between {output_rail} and ground."
+                ))
+
+        # Inductor check (switching regulators only)
+        l_specs = getattr(regulator, "inductor_range", None)
+        if has_data(l_specs):
+            sv = best(l_specs, min_confidence="medium")
+            if sv is not None and not reg.get("inductor"):
+                # Switching regulator with no detected inductor in topology.
+                rec_l = sv.typ if sv.typ is not None else (sv.min or sv.max)
+                rail_for_finding = output_rail or input_rail or "(unknown rail)"
+                findings.append(_make_ex_001(
+                    ref, mpn, "inductor", rail_for_finding, sv,
+                    "regulator.inductor_range", ctx.source, design_context,
+                    f"Add a {rec_l}H inductor between the switch node and {output_rail}."
+                ))
+    return findings
+
+
+def _make_ex_001(ref, mpn, kind, rail, sv, datasheet_field, source,
+                   design_context, recommendation):
+    """Build an EX-001 finding from common args."""
+    spec_min = getattr(sv, "min", None)
+    spec_typ = getattr(sv, "typ", None)
+    spec_max = getattr(sv, "max", None)
+    return make_finding(
+        detector="detect_missing_required_components",
+        rule_id="EX-001",
+        category="completeness",
+        summary=(f"{ref} ({mpn}) requires {kind} per datasheet but none "
+                  f"found on {rail}"),
+        description=(f"Datasheet field {datasheet_field} for {ref} ({mpn}) "
+                      f"specifies a required {kind} on {rail}; no component "
+                      f"of that kind is connected to that net in the schematic. "
+                      f"Required spec: min={spec_min}, typ={spec_typ}, "
+                      f"max={spec_max} {getattr(sv, 'unit', '')}."),
+        severity="error",
+        confidence="datasheet-backed",
+        evidence_source="datasheet",
+        components=[ref],
+        nets=[rail] if rail else [],
+        recommendation=recommendation,
+        report_section="Completeness",
+        impact="Regulator may oscillate, fail to start, or violate datasheet stability requirements.",
+        source=source,
+        design_context=design_context,
+        schema_era="v1.4",
+        missing_kind=kind,
+        datasheet_field=datasheet_field,
+        spec_min=spec_min,
+        spec_typ=spec_typ,
+        spec_max=spec_max,
+    )
