@@ -127,6 +127,7 @@ from validation_detectors import (
 )
 from lookup_detectors import (
     detect_absolute_max_violations,
+    detect_vcc_outside_recommended,
 )
 from finding_schema import compute_trust_summary, sort_findings
 from envelopes.schematic import SchematicEnvelope
@@ -799,6 +800,7 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
     # Soft-skip when get_facts() returns None (no MPN cache). Synonym-resolved
     # rail keys per addendum §A2; per-pin Pin.absolute_max overrides rail-level.
     am_001_findings = detect_absolute_max_violations(ctx, rail_voltages)
+    ov_001_findings = detect_vcc_outside_recommended(ctx, rail_voltages)
 
     # New domain detectors (rich format)
     wireless_modules = detect_wireless_modules(ctx)
@@ -1027,7 +1029,8 @@ def analyze_signal_paths(ctx: AnalysisContext) -> dict:
             crystal_load_findings
         ),
         "lookup_findings": (
-            am_001_findings
+            am_001_findings +
+            ov_001_findings
         ),
     }
 

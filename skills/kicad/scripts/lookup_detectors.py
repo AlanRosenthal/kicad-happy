@@ -178,3 +178,119 @@ def detect_absolute_max_violations(ctx, rail_voltages: dict) -> list[dict]:
                 domain=domain,
             ))
     return findings
+
+
+# ---------------------------------------------------------------------------
+# OV-001 — VCC outside recommended operating range
+# ---------------------------------------------------------------------------
+
+def detect_vcc_outside_recommended(ctx, rail_voltages: dict) -> list[dict]:
+    """OV-001: For each IC pin with a power_domain, verify the connected
+    rail voltage is within base.recommended_operating[domain] range
+    (with synonym resolution).
+
+    Severity: warning (escalates via severity_tuning matrix in
+    automotive/medical environments through Layer 2).
+    """
+    findings: list[dict] = []
+    cache_dir = getattr(ctx, "cache_dir", None)
+    design_context = getattr(ctx, "design_context", None)
+
+    for component in ctx.components:
+        ref = component.get("reference") or component.get("ref")
+        mpn = _component_mpn(component)
+        if not ref or not mpn:
+            continue
+        facts = get_facts(mpn, cache_dir=cache_dir)
+        if facts is None:
+            continue
+        base = getattr(facts, "base", None)
+        if base is None:
+            continue
+        rec_block = getattr(base, "recommended_operating", None)
+        pinout = getattr(base, "pinout", None)
+        if not rec_block or pinout is None:
+            continue
+
+        for pin in pinout:
+            domain = getattr(pin, "power_domain", None)
+            if not domain:
+                continue
+            net = _connected_net(ctx, ref, getattr(pin, "numbers", []))
+            if net is None:
+                continue
+            rail_v = rail_voltages.get(net)
+            if rail_v is None:
+                continue
+
+            synonyms = _candidate_synonyms(domain, VDD_SYNONYMS)
+            specs = _resolve_key(rec_block, synonyms)
+            if not has_data(specs):
+                continue
+            sv = best(specs, min_confidence="medium")
+            if sv is None:
+                continue
+            v_min = sv.min
+            v_max = sv.max
+
+            pin_number = pin.numbers[0] if pin.numbers else "?"
+
+            if v_min is not None and rail_v < v_min:
+                findings.append(make_finding(
+                    detector="detect_vcc_outside_recommended",
+                    rule_id="OV-001",
+                    category="electrical_safety",
+                    summary=(f"{ref} pin {pin_number} ({pin.name}) on {net} at "
+                              f"{rail_v}V below recommended min {v_min}V"),
+                    description=(f"Pin {pin_number} of {ref} ({mpn}) connects to "
+                                  f"net {net} at {rail_v}V, below the recommended "
+                                  f"operating minimum of {v_min}V for domain {domain}. "
+                                  f"Operation outside the recommended range may "
+                                  f"compromise specified electrical characteristics."),
+                    severity="warning",
+                    confidence="datasheet-backed",
+                    evidence_source="datasheet",
+                    components=[ref],
+                    nets=[net],
+                    pins=[{"ref": ref, "pin": pin_number, "name": pin.name}],
+                    recommendation=(f"Raise {net} to at least {v_min}V or use a "
+                                     f"part rated for lower-voltage operation."),
+                    report_section="Electrical Safety",
+                    impact="Specified electrical characteristics may not be met.",
+                    source=ctx.source,
+                    design_context=design_context,
+                    schema_era="v1.4",
+                    rail_voltage=rail_v,
+                    recommended_min=v_min,
+                    domain=domain,
+                ))
+            elif v_max is not None and rail_v > v_max:
+                findings.append(make_finding(
+                    detector="detect_vcc_outside_recommended",
+                    rule_id="OV-001",
+                    category="electrical_safety",
+                    summary=(f"{ref} pin {pin_number} ({pin.name}) on {net} at "
+                              f"{rail_v}V above recommended max {v_max}V"),
+                    description=(f"Pin {pin_number} of {ref} ({mpn}) connects to "
+                                  f"net {net} at {rail_v}V, above the recommended "
+                                  f"operating maximum of {v_max}V for domain {domain}. "
+                                  f"Still within absolute_max but specified "
+                                  f"performance is not guaranteed."),
+                    severity="warning",
+                    confidence="datasheet-backed",
+                    evidence_source="datasheet",
+                    components=[ref],
+                    nets=[net],
+                    pins=[{"ref": ref, "pin": pin_number, "name": pin.name}],
+                    recommendation=(f"Reduce {net} below {v_max}V or use a part "
+                                     f"rated for higher-voltage operation."),
+                    report_section="Electrical Safety",
+                    impact="Specified electrical characteristics may not be met.",
+                    source=ctx.source,
+                    design_context=design_context,
+                    schema_era="v1.4",
+                    rail_voltage=rail_v,
+                    recommended_max=v_max,
+                    domain=domain,
+                ))
+    return findings
