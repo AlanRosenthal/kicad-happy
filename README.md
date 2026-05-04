@@ -512,6 +512,27 @@ Each detector emits `confidence: "datasheet-backed"` + `evidence_source: "datash
 
 11 commits on `v1.4-dev`; 423 contract tests green (390 → 423, +33 new).
 
+### Phase 4c — 6 New Detectors via `lookup()` (CLOSED 2026-05-03)
+
+Six new detectors land in `skills/kicad/scripts/lookup_detectors.py`, each consuming v1.4 datasheet facts via the Phase 2 Consumer API. Module-top synonym tables (`VDD_SYNONYMS`, `TJ_SYNONYMS`, `THETA_JA_SYNONYMS`) plus `_resolve_key()` reconcile the open `additionalProperties: SpecValue[]` keys on `base.absolute_max` / `base.recommended_operating` / `base.thermal` with mixed extractor spellings observed in the corpus (`VDD/VCC/VDDA`, `TJ/TJ_max/Tj`).
+
+| Rule | Checks | Required v1.4 fields | Severity |
+|------|--------|----------------------|----------|
+| **AM-001** | Rail voltage exceeds absolute_max for pin's power_domain | `base.absolute_max[VDD_SYNONYMS]` + `pinout.power_domain`; per-pin `Pin.absolute_max` overrides when stricter | error |
+| **OV-001** | Rail voltage outside recommended operating range | `base.recommended_operating[VDD_SYNONYMS]` (min and max bounds) | warning |
+| **TJ-001** | Estimated junction temp exceeds TJmax | `base.thermal[theta_ja]` + `base.absolute_max[TJ_SYNONYMS]`; recomputes TJ = ambient + θJA × P_diss | error |
+| **FT-001** | 5V signal driven into a non-5V-tolerant pin | `pinout.is_5v_tolerant` (None treated as unknown, not as not-tolerant) | error |
+| **PM-001** | Net name suggests peripheral function not in pin's alt_functions | `pinout.alt_functions[].peripheral`/`name`; net-name regex map covers UART/I2C/SPI/USB/CAN/I2S | warning |
+| **EX-001** | Datasheet-required regulator passive missing | `regulator.cin_min` (input cap), `cout_min` (output cap), `inductor_range` (switching topologies) | error |
+
+All findings emit `confidence: "datasheet-backed"` + `evidence_source: "datasheet"` and tag `schema_era: "v1.4"`. Detectors soft-skip when `get_facts()` returns None (cache miss / stale / below trust gate) — no analyzer ever blocks on lookup, per spec §5.1. `design_context` threads through every emit site for Layer 2 severity tuning.
+
+Wiring: AM-001/OV-001/FT-001/PM-001/EX-001 invoked from `analyze_schematic.py` into a new `lookup_findings` results-dict key parallel to `validation_findings`. TJ-001 invoked from `analyze_thermal.py` after the existing `_compute_junction_temps` pass — operates on the assessments list with v1.3-derived `pdiss_w`/`ambient_c` and recomputes TJ via v1.4 θJA. Both call sites read `cache_dir` and `design_context` via `getattr(ctx, ..., None)` matching the Phase 4b convention until 4d-active wires the fields onto `AnalysisContext`.
+
+**Day-1 fire prognosis** (per harness data-presence audit, 2026-05-03; populated fields across the 6-MPN reference corpus): AM-001 fires on 6/6 MPNs (block presence) with rail-mapping on 3/6; TJ-001 fires on 4/6; FT-001/PM-001 fire on STM32-class parts (alt_functions and is_5v_tolerant populated only there today); EX-001 fires on LM2596-ADJ (sole regulator with cin_min/cout_min/inductor_range populated); OV-001 covers 1/6. The remaining MPNs ship probe-only — detectors fire automatically when extractor prompts populate the missing fields in v1.5.
+
+6 commits on `v1.4-dev`; **454 contract tests green** (423 → 454, +31 new across 6 detector test files).
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.
