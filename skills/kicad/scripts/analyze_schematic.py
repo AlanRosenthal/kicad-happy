@@ -137,6 +137,29 @@ from envelopes.schematic import SchematicEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
 from capability_mode import get_capability_mode_ref
+from lookup_helpers import read_design_context
+
+
+def _resolve_lookup_paths(sch_path: str | Path,
+                           analysis_dir: str | Path | None) -> tuple[Path | None, dict | None]:
+    """Resolve (cache_dir, design_context) for AnalysisContext (Phase 4d-active).
+
+    cache_dir is the datasheets/extracted/ directory adjacent to the schematic
+    (matching the existing convention used by analyze_thermal.py and the
+    audit_datasheet_coverage check). Returns None when the directory doesn't
+    exist — `lookup()` already handles None gracefully.
+
+    design_context is the parsed design_context.json from the analysis dir,
+    or None when absent or analysis_dir is None.
+    """
+    sch_dir = Path(sch_path).resolve().parent
+    candidates = [
+        sch_dir / "datasheets" / "extracted",
+        sch_dir.parent / "datasheets" / "extracted",
+    ]
+    cache_dir = next((c for c in candidates if c.is_dir()), None)
+    dc = read_design_context(analysis_dir) if analysis_dir else None
+    return cache_dir, dc
 
 ANALYZER_SOURCE = "sch"
 
@@ -2954,7 +2977,7 @@ def _parse_legacy_single_sheet(path: str) -> tuple:
     return components, wires, labels, junctions, no_connects, sub_sheet_paths, lib_lines
 
 
-def parse_legacy_schematic(path: str) -> dict:
+def parse_legacy_schematic(path: str, analysis_dir: str | Path | None = None) -> dict:
     """Parse a KiCad 5 legacy .sch file and return the same structure as analyze_schematic.
 
     Legacy format uses line-oriented text with $Comp/$EndComp blocks, coordinates
@@ -3105,12 +3128,15 @@ def parse_legacy_schematic(path: str) -> dict:
     pin_net = build_pin_to_net_map(nets)
 
     # Build shared analysis context for legacy path
+    _cache_dir, _design_context = _resolve_lookup_paths(path, analysis_dir)
     ctx = AnalysisContext(
         components=all_components,
         nets=nets,
         lib_symbols=lib_symbols,
         pin_net=pin_net,
         no_connects=all_no_connects,
+        cache_dir=_cache_dir,
+        design_context=_design_context,
     )
     ctx.source = ANALYZER_SOURCE
     from netlist_queries import NetlistQueries
@@ -8605,7 +8631,8 @@ def enrich_from_hierarchy(signal_analysis: dict, design_analysis: dict,
 
 
 def analyze_schematic(path: str, project_root: str | None = None,
-                      no_hierarchy: bool = False) -> dict:
+                      no_hierarchy: bool = False,
+                      analysis_dir: str | Path | None = None) -> dict:
     """Main analysis function. Returns complete structured data.
 
     For hierarchical designs (multi-sheet), recursively parses all sub-sheets
@@ -8629,7 +8656,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
         first_line = f.readline().strip()
 
     if first_line.startswith("EESchema"):
-        return parse_legacy_schematic(path)
+        return parse_legacy_schematic(path, analysis_dir=analysis_dir)
 
     # Parse root sheet and all sub-sheets recursively via parse_all_sheets().
     root_tree = parse_file(path)
@@ -8708,6 +8735,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
     pin_net = build_pin_to_net_map(nets)
 
     # Build shared analysis context (replaces repeated comp_lookup / parsed_values / known_power_rails)
+    _cache_dir, _design_context = _resolve_lookup_paths(path, analysis_dir)
     ctx = AnalysisContext(
         components=all_components,
         nets=nets,
@@ -8716,6 +8744,8 @@ def analyze_schematic(path: str, project_root: str | None = None,
         no_connects=all_no_connects,
         generator_version=generator_version,
         hierarchy_context=hierarchy_ctx,
+        cache_dir=_cache_dir,
+        design_context=_design_context,
     )
     ctx.source = ANALYZER_SOURCE
     from netlist_queries import NetlistQueries
@@ -9129,9 +9159,19 @@ def main():
     )
     compat = build_compat()
 
+    # Resolve analysis_dir BEFORE calling analyze_schematic so AnalysisContext
+    # can populate design_context from analysis/design_context.json (Phase 4d-active).
+    if args.analysis_dir:
+        _analysis_dir_for_ctx = Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir_for_ctx = Path(args.output).parent
+    else:
+        _analysis_dir_for_ctx = Path("analysis")
+
     result = analyze_schematic(args.schematic,
                                project_root=args.project_root,
-                               no_hierarchy=args.no_hierarchy)
+                               no_hierarchy=args.no_hierarchy,
+                               analysis_dir=_analysis_dir_for_ctx)
     # Inject provenance and drop the legacy 'file' key (already removed
     # from internal result assembly, but belt-and-suspenders).
     result["inputs"] = inputs
