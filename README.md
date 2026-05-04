@@ -533,6 +533,27 @@ Wiring: AM-001/OV-001/FT-001/PM-001/EX-001 invoked from `analyze_schematic.py` i
 
 6 commits on `v1.4-dev`; **454 contract tests green** (423 → 454, +31 new across 6 detector test files).
 
+### Phase 4d-active — Layer 2 End-to-End Exercise (CLOSED 2026-05-04)
+
+Production prompts written for `skills/kicad/review/prompts/design_context.md` and `skills/kicad/review/prompts/reviewer.md` (replacing the 4d-skeleton scaffolds). `AnalysisContext.cache_dir` and `AnalysisContext.design_context` fields wired onto the dataclass and populated at the two construction sites in `analyze_schematic.py` — activating the datasheet-backed branch in 4b/4c lookup detectors when `analysis/design_context.json` and `datasheets/extracted/` are both present. Resolution helper `_resolve_lookup_paths()` mirrors `analyze_thermal.py`'s existing `extract_dir` convention.
+
+End-to-end orchestrator at `skills/kicad/review/scripts/run_phase4_exercise.py` exercises the full Layer 1 → Layer 2 pipeline in 5 steps:
+1. Run 5 Layer 1 analyzers (schematic / pcb / thermal / emc / cross_analysis — gerber skipped for v1.4 fixture, no fab outputs)
+2. Assert HI-7: `capability_mode_ref.run_id` consistent across every envelope vs canonical `analysis/capability_mode.json`
+3. Build the 2-task review plan (`design_context` Tier B + `reviewer` Tier A)
+4. Merge `review_annotations.json` into `analysis/merged/<analyzer>.json` overlays; assert HI-3 strip-LLM byte-identical
+5. Dual-mode consumer-contract probe: overlay-only differences (HI-2), finding count parity raw vs merged
+
+**v1.4 fixture exercise verdict:** All 5 steps PASS on `tests/fixtures/phase4-review/` (gitignored — SparkFun GNSSDO board imported from harness corpus, ~444 findings across 5 analyzers). Reviewer subagent produced 10 schema-valid annotations (6 confirmed, 4 suppressed, 0 escalated; 0.9% suppression rate well under HI-8 30% cap). Merge applied 10 / suppressed 4 with 0 invariant_violations and 0 orphans.
+
+8 new contract tests in `tests/contract/test_phase4_exercise.py` skip cleanly when the fixture is absent (CI-safe). Tests cover HI-3, HI-2, HI-8, HI-7, schema_era v1.4 sanity, design_context schema validity, review_annotations schema validity, and `produced_for_run_id` ↔ `capability_mode.run_id` linkage.
+
+5 commits on `v1.4-dev`; **462 contract tests green** (454 → 462, +8 new). **Phase 4 closes end-to-end with this sub-phase.**
+
+### Phase 4 — Phase Total
+
+11 detectors gain datasheet authority (5 upgraded + 6 new). Layer 2 LLM review architecture lands with 9 hard invariants (HI-1..9) asserted by main-repo unit tests + harness B-tests (B1–B9). 36 plan tasks across 5 sub-phases (4a foundation, 4d-skeleton architecture, 4b 5 upgraded, 4c 6 new, 4d-active end-to-end). ~50 commits total (Phase 1 + 2 + 3a + 3b + 4a + 4d-skeleton + 4b + 4c + 4d-active). Layer 2 ships **active but uncalibrated** per spec Q2-B; precision/recall calibration deferred to v1.5.
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.
