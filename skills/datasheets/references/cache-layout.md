@@ -145,6 +145,29 @@ consumers decide what to do:
   staleness — v1.3 API returns the dict either way; consumers got this
   from v1.3 too.
 
+## Static Examples vs Runtime Cache
+
+Two distinct directories that look similar but serve different purposes:
+
+- **`skills/datasheets/examples/<mpn>.json`** (in this repo) — static
+  schema documentation, one canonical merged extraction per Phase 3b
+  category (regulator, crystal, transistor, opamp, mcu, diode). These
+  files are **not read by `lookup()`** at runtime — they exist solely
+  to make the v1.4 schemas self-documenting via concrete instances.
+  Six MPNs: `lm2596-adj`, `abm8g-106-12.000mhz-t`, `irlml6344`,
+  `lm358`, `stm32f103c8t6`, `mbrs540t3g`.
+- **`<user-project>/datasheets/extracted/<MPN>.json`** — runtime cache,
+  populated by users running `datasheets sync` against their own
+  schematics. `lookup(mpn, cache_dir=<user-project>/datasheets/extracted)`
+  reads from here.
+
+The Phase 3a/3b extraction audit trail (per-stage `.scout.*`,
+`.base.*`, `.<category>.*`, `.pinout.*`, `.plan.*` files for the six
+canonical MPNs) lives in the harness repo
+(`kicad-happy-testharness`) as test fixtures, not in this product
+repo. This product repo only ships the final merged JSONs as static
+examples.
+
 ## Related Tracks
 
 - **Track 2.1** — JSON Schema contracts for per-MPN files, pinout,
