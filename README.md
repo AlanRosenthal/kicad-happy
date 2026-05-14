@@ -559,6 +559,15 @@ End-to-end orchestrator at `skills/kicad/review/scripts/run_phase4_exercise.py` 
 
 11 detectors gain datasheet authority (5 upgraded + 6 new). Layer 2 LLM review architecture lands with 9 hard invariants (HI-1..9) asserted by main-repo unit tests + harness B-tests (B1–B9). 36 plan tasks across 5 sub-phases (4a foundation, 4d-skeleton architecture, 4b 5 upgraded, 4c 6 new, 4d-active end-to-end). ~50 commits total (Phase 1 + 2 + 3a + 3b + 4a + 4d-skeleton + 4b + 4c + 4d-active). Layer 2 ships **active but uncalibrated** per spec Q2-B; precision/recall calibration deferred to v1.5.
 
+## v1.3.1 — Bug fixes + Connectivity
+
+- Fix `format-report.py` crash on dict-shaped `power_rails` (issues #16, #20).
+- Add `.kicad_pro` `top_level_sheets` support for Altium flat multi-page imports (#19).
+- PCB connectivity rewrite: track-as-node model, compound pads, `*.Cu` wildcards.
+- Fix pad rotation sign; unify analysis-dir resolution.
+- KH-147: suppress LED-driver false positives when the current resistor's value field has a suffix the parser can't read (e.g. `215k_0402_…`).
+- Bump minimum Python to 3.10; add cross-agent install guidance (Claude Code, Codex, Gemini).
+
 ## 🎯 v1.3 — Harmonized Analysis
 
 v1.2 made findings trustworthy. v1.3 makes them uniform and traceable. **Every analyzer** — schematic, PCB, Gerber, thermal, EMC, cross-analysis, SPICE, lifecycle — now produces the same flat `findings[]` format with rich envelopes (`detector`, `rule_id`, `severity`, `confidence`, `evidence_source`, `recommendation`, `report_context`). Every finding carries its own provenance. One schema to query, filter, export, and audit.
