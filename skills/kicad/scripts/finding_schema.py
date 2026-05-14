@@ -436,6 +436,7 @@ class Det:
     CURRENT_SENSE = 'detect_current_sense'
     PROTECTION_DEVICES = 'detect_protection_devices'
     DESIGN_OBSERVATIONS = 'detect_design_observations'
+    VOLTAGE_DERATING = 'analyze_voltage_derating'
     # Domain detectors
     BUZZER_SPEAKERS = 'detect_buzzer_speakers'
     KEY_MATRICES = 'detect_key_matrices'
@@ -534,10 +535,12 @@ def group_findings(data):
 
 
 # ---------------------------------------------------------------------------
-# Legacy key mapping — used by detection_schema / what_if / diff_analysis
+# Detection-type key mapping — adapter between the flat findings[] `detector`
+# namespace and the detection-type keys used by detection_schema.SCHEMAS.
+# Consumed by what_if.py and diff_analysis.py.
 # ---------------------------------------------------------------------------
 
-DETECTOR_TO_LEGACY_KEY = {
+DETECTOR_TO_SCHEMA_KEY = {
     "detect_power_regulators": "power_regulators",
     "detect_integrated_ldos": "power_regulators",
     "detect_voltage_dividers": "voltage_dividers",
@@ -589,13 +592,14 @@ DETECTOR_TO_LEGACY_KEY = {
 }
 
 
-def group_findings_legacy(data):
-    """Group findings by legacy signal_analysis key names.
+def group_findings_by_detection_type(data):
+    """Group flat findings[] by detection-type key.
 
-    Returns {legacy_key: [finding, ...]} dict compatible with the
-    old signal_analysis dict-of-lists layout.  Detector names are
-    mapped via DETECTOR_TO_LEGACY_KEY so that downstream code (SCHEMAS,
-    SPICE templates, --fix CLI) works unchanged.
+    Returns {detection_type_key: [finding, ...]} — an adapter between the
+    flat findings[] `detector` namespace and the detection-type keys used
+    by detection_schema.SCHEMAS / SIGNAL_REGISTRY.  Detector names are
+    mapped via DETECTOR_TO_SCHEMA_KEY so downstream code (SCHEMAS, SPICE
+    templates, what_if --fix) works unchanged.
 
     Detects pre-v1.3 JSON (signal_analysis wrapper, no findings[]) and
     emits a warning to stderr.  Returns empty dict in that case — callers
@@ -611,7 +615,7 @@ def group_findings_legacy(data):
     for f in data.get("findings", []):
         det = f.get("detector", "")
         if det:
-            key = DETECTOR_TO_LEGACY_KEY.get(det, det)
+            key = DETECTOR_TO_SCHEMA_KEY.get(det, det)
             sa.setdefault(key, []).append(f)
     return sa
 

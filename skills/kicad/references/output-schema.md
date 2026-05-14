@@ -125,6 +125,7 @@ Output of `python3 skills/kicad/scripts/analyze_schematic.py <file>.kicad_sch`.
 | `pwr_flag_warnings` | `list[dict]` | no | PWR_FLAG warnings: [{net, message, pin_types}]. |
 | `label_shape_warnings` | `list` | no | Label-shape mismatch warnings. |
 | `footprint_filter_warnings` | `list` | no | Footprint filter warnings from lib_symbols. |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views; only present when output filters ran. |
 | `design_intent` | `dict \| null` | no | Resolved design intent: approved_manufacturers, ipc_class, target_market, operating_temp_range, preferred_passive_size, product_class, test_coverage_target, expected_lifetime_years, detection_signals, source, confidence. |
 | `project_config` | `dict \| null` | no | Copy of the resolved project block from .kicad-happy.json (when present). |
@@ -139,7 +140,6 @@ Output of `python3 skills/kicad/scripts/analyze_schematic.py <file>.kicad_sch`.
 | `power_sequencing` | `dict \| null` | no | Power sequencing dependencies and warnings. |
 | `power_sequencing_validation` | `dict \| null` | no | Validated power tree with provenance. |
 | `pdn_impedance` | `dict \| null` | no | PDN impedance analysis per rail. |
-| `voltage_derating` | `dict \| null` | no | Capacitor/component voltage derating audit. |
 | `usb_compliance` | `dict \| null` | no | USB compliance checks. |
 | `inrush_analysis` | `dict \| null` | no | Inrush current estimation by rail. |
 | `protocol_compliance` | `dict \| null` | no | Protocol compliance checks (I2C/SPI/UART/etc.). |
@@ -198,6 +198,7 @@ Output of `python3 skills/kicad/scripts/analyze_pcb.py <file>.kicad_pcb`.
 | `dfm_summary` | `dict` | yes | DFM rollup: dfm_tier, metrics, violation_count. |
 | `design_rule_compliance` | `dict` | yes | Design rule compliance: compliant, rules_checked, rules_source. |
 | `project_settings` | `dict` | yes | Selected settings extracted from .kicad_pro: source, net_classes, design_rules. |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views; only present when output filters ran. |
 | `design_intent` | `dict \| null` | no | Resolved design intent: product_class, ipc_class, target_market, operating_temp_range, preferred_passive_size, test_coverage_target, approved_manufacturers, expected_lifetime_years, detection_signals, confidence, source. |
 | `project_config` | `dict \| null` | no | Copy of the resolved project block from .kicad-happy.json (when present). |
@@ -245,6 +246,7 @@ Output of `python3 skills/kicad/scripts/analyze_gerbers.py <gerber_dir>/`.
 | `job_file` | `dict \| null` | no | Parsed .gbrjob contents: project_name, vendor, generator, layer_count, board_width_mm, board_height_mm, board_thickness_mm, creation_date, finish, stackup, design_rules, expected_files. Omitted when no .gbrjob present. |
 | `zip_archives` | `list[dict] \| null` | no | Zip archive sweep; each entry: {filename, size_bytes, modified, total_files, gerber_files, drill_files, other_files, newest_member_date, staleness_warning}. Omitted when no .zip files in the directory. |
 | `connectivity` | `list[dict] \| null` | no | Flat pin-to-net list from X2 attributes (--full only). Each item: {ref, pin, pin_name, net}. |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views; only present when output filters ran. |
 
 ## ThermalEnvelope
@@ -263,6 +265,7 @@ Output of `python3 skills/kicad/scripts/analyze_thermal.py --schematic ... --pcb
 | `trust_summary` | `TrustSummary` | yes | Trust posture rollup. |
 | `elapsed_s` | `float` | yes | Wall-clock analysis time in seconds. |
 | `missing_info` | `ThermalMissingInfo \| null` | no | Emitted when any component used default thermal params. |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 
 ## EMCEnvelope
 
@@ -285,6 +288,7 @@ Output of `python3 skills/emc/scripts/analyze_emc.py --schematic ... --pcb ...`.
 | `regulatory_coverage` | `RegulatoryCoverage` | yes | Coverage matrix vs. applicable standards for the target market. |
 | `category_summary` | `dict[str, CategorySummaryEntry]` | yes | Category label -> {count, max_severity, severities, suppressed_count}. |
 | `board_info` | `BoardInfo` | yes | Board-level rollup (dimensions, layer count, crystal + switching frequencies, ...). |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views. Present whenever findings[] is non-empty (the analyzer always builds this when findings exist). |
 | `stage_filter` | `dict \| null` | no | Stage-filtered findings rollup. Present only when --stage is passed. |
 
@@ -303,5 +307,6 @@ Output of `python3 skills/kicad/scripts/cross_analysis.py --schematic ... --pcb 
 | `findings` | `list[Finding]` | yes | All cross-domain findings. |
 | `assessments` | `list[Assessment]` | yes | Informational assessments (empty for cross-analysis at v1.4). |
 | `trust_summary` | `TrustSummary` | yes | Trust posture rollup (confidence + evidence source). |
+| `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views. Added by apply_output_filters whenever findings[] is non-empty. |
 | `stage_filter` | `dict \| null` | no | Stage-filtered findings rollup. Present only when --stage is passed. |

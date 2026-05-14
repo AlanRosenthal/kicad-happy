@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "..", "spice", "scripts"))
 
 from kicad_utils import parse_value
-from finding_schema import group_findings_legacy, is_old_schema
+from finding_schema import group_findings_by_detection_type, is_old_schema
 
 
 @dataclass
@@ -363,7 +363,7 @@ def _run_spice_comparison(affected: list, patched_dets: list,
 def _run_sweep(analysis: dict, sweep: SweepSpec, fixed_changes: dict,
                spice: bool = False) -> dict:
     """Run the what-if pipeline for each sweep value, collect tabular results."""
-    signal = group_findings_legacy(analysis)
+    signal = group_findings_by_detection_type(analysis)
     results_per_step = []
 
     for val, val_str in zip(sweep.values, sweep.value_strs):
@@ -405,7 +405,7 @@ def _run_tolerance(analysis: dict, changes: dict, spice: bool = False) -> list:
     Evaluates all 2^N corner combinations (each component at +tol and -tol).
     Capped at 6 components (64 corners).
     """
-    signal = group_findings_legacy(analysis)
+    signal = group_findings_by_detection_type(analysis)
 
     # Resolve tolerances (use defaults for components without explicit tolerance)
     _DEFAULT_TOL = {"C": 0.10, "VC": 0.10, "L": 0.20}  # everything else = 0.05
@@ -1304,7 +1304,7 @@ def main():
               "findings[] format.", file=sys.stderr)
         sys.exit(1)
 
-    signal = group_findings_legacy(analysis)
+    signal = group_findings_by_detection_type(analysis)
     if not signal:
         print("Error: no subcircuit findings in input JSON", file=sys.stderr)
         sys.exit(1)

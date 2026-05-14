@@ -30,7 +30,7 @@ import sys
 # value_fields: numeric/string fields to compare for changes
 
 from detection_schema import SCHEMAS as _SCHEMAS
-from finding_schema import group_findings_legacy
+from finding_schema import group_findings_by_detection_type
 
 # SIGNAL_REGISTRY is derived from the unified detection schema.
 # Kept as a module-level name for backward compat (validate_signal_registry, _diff_items).
@@ -44,7 +44,7 @@ def validate_signal_registry(sample_output: dict) -> list[str]:
     whose key is not found in the findings of the sample output.
     Useful for catching stale registry entries after schema changes.
     """
-    sa = group_findings_legacy(sample_output)
+    sa = group_findings_by_detection_type(sample_output)
     warnings = []
     for key in SIGNAL_REGISTRY:
         if key not in sa:
@@ -368,8 +368,8 @@ def diff_schematic(base, head, threshold):
         result["components"] = comp_diff
 
     # Signal analysis (grouped from flat findings[])
-    base_sa = group_findings_legacy(base)
-    head_sa = group_findings_legacy(head)
+    base_sa = group_findings_by_detection_type(base)
+    head_sa = group_findings_by_detection_type(head)
     all_keys = set(list(base_sa.keys()) + list(head_sa.keys()))
     sa_diff = {}
 
@@ -1215,7 +1215,7 @@ def _extract_trends(analysis_dir, output_type, n_runs):
         except (json.JSONDecodeError, OSError):
             continue
 
-        sa = group_findings_legacy(data)
+        sa = group_findings_by_detection_type(data)
         for det_type, detections in sa.items():
             if not isinstance(detections, list):
                 continue

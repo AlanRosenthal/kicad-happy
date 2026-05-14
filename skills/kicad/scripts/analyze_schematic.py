@@ -132,7 +132,7 @@ from lookup_detectors import (
     detect_wrong_signal_type,
     detect_missing_required_components,
 )
-from finding_schema import compute_trust_summary, sort_findings
+from finding_schema import compute_trust_summary, sort_findings, make_finding
 from envelopes.schematic import SchematicEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
@@ -6440,7 +6440,7 @@ _DERATING_PROFILES = {
 
 def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
                              project_dir: str | None = None,
-                             derating_profile: str = "commercial") -> dict:
+                             derating_profile: str = "commercial") -> list[dict]:
     """Check component voltage/power ratings against applied conditions.
 
     Checks capacitors (voltage derating by dielectric type), IC absolute
@@ -6535,9 +6535,7 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
     _RESISTOR_POWER_RATING = {"0201": 0.05, "0402": 0.0625, "0603": 0.1, "0805": 0.125,
                               "1206": 0.25, "1210": 0.5, "2010": 0.75, "2512": 1.0}
 
-    derating_issues = []
-    over_designed = []
-    caps_checked = ics_checked = resistors_checked = 0
+    findings: list[dict] = []
 
     # ---- Capacitor voltage derating ----
     for comp in components:
@@ -6556,7 +6554,6 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
         dielectric = _classify_cap_dielectric(comp)
         derating_factor = _CAP_DERATING.get(dielectric, 0.50)
         max_working_v = rated_v * derating_factor
-        caps_checked += 1
         margin_pct = ((rated_v - v_rail) / rated_v) * 100 if rated_v > 0 else 0
         severity = derating_rule = None
         if v_rail > rated_v:
@@ -6564,10 +6561,22 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
         elif v_rail > max_working_v:
             severity, derating_rule = "warning", f"{dielectric}_{int(derating_factor * 100)}pct"
         if severity:
-            derating_issues.append({"ref": ref, "value": comp["value"], "component_type": "capacitor",
-                                    "rail": pwr_net, "rail_voltage": v_rail, "rated_voltage": rated_v,
-                                    "margin_pct": round(margin_pct, 1), "dielectric": dielectric,
-                                    "derating_rule": derating_rule, "severity": severity})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-001",
+                category="component_derating",
+                summary=(f"{ref} ({comp['value']}) {'exceeds' if severity == 'critical' else 'has marginal'} "
+                         f"voltage derating on {pwr_net} ({v_rail:.1f}V on {rated_v:.0f}V {dielectric} cap)"),
+                description=(f"Applied {v_rail:.1f}V on {pwr_net}; {rated_v:.0f}V-rated {dielectric} capacitor. "
+                             f"Derating rule: {derating_rule}. Margin {round(margin_pct, 1)}%."),
+                severity="error" if severity == "critical" else "warning",
+                confidence="heuristic", evidence_source="topology",
+                components=[ref], nets=[pwr_net],
+                recommendation=("Increase capacitor voltage rating." if severity == "critical"
+                                else f"Consider a higher voltage rating — {dielectric} caps need derating margin."),
+                impact="Capacitor may fail short under applied voltage." if severity == "critical" else "",
+                derating_rule=derating_rule, rail=pwr_net, rail_voltage=v_rail,
+                rated_voltage=rated_v, margin_pct=round(margin_pct, 1), dielectric=dielectric,
+            ))
         elif margin_pct > profile["over_designed_cap_margin"] * 100:
             suggested_v = v_rail * 2.5
             suggested_ratings = [v for v in (6.3, 10, 16, 25, 50, 100) if v >= suggested_v]
@@ -6575,9 +6584,17 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
             if suggested_ratings and suggested_ratings[0] < rated_v:
                 suggestion = (f"Consider {suggested_ratings[0]:.0f}V rating — "
                               f"{rated_v:.0f}V is significantly over-designed for a {v_rail:.1f}V rail")
-            over_designed.append({"ref": ref, "value": comp["value"], "component_type": "capacitor",
-                                  "rail": pwr_net, "rail_voltage": v_rail, "rated_voltage": rated_v,
-                                  "margin_pct": round(margin_pct, 1), "suggestion": suggestion})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-004",
+                category="component_derating",
+                summary=f"{ref} ({comp['value']}) is over-designed for {pwr_net} ({rated_v:.0f}V on {v_rail:.1f}V rail)",
+                description=f"{rated_v:.0f}V-rated capacitor on a {v_rail:.1f}V rail — margin {round(margin_pct, 1)}%.",
+                severity="info", confidence="heuristic", evidence_source="topology",
+                components=[ref], nets=[pwr_net],
+                recommendation=suggestion or "Consider a lower voltage rating to reduce cost/size.",
+                derating_rule="over_designed", rail=pwr_net, rail_voltage=v_rail,
+                rated_voltage=rated_v, margin_pct=round(margin_pct, 1),
+            ))
 
     # ---- IC absolute max voltage check ----
     for comp in components:
@@ -6609,20 +6626,34 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
                     max_rail_v, max_rail_name = v, net_name
         if max_rail_v <= 0:
             continue
-        ics_checked += 1
         margin_pct = ((vin_max - max_rail_v) / vin_max) * 100 if vin_max > 0 else 0
         if max_rail_v > vin_max:
-            derating_issues.append({"ref": ref, "value": comp["value"], "component_type": "ic",
-                                    "rail": max_rail_name, "rail_voltage": max_rail_v,
-                                    "abs_max_vin": vin_max, "margin_pct": round(margin_pct, 1),
-                                    "derating_rule": "exceeds_abs_max", "data_source": "extraction_cache",
-                                    "severity": "critical"})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-002",
+                category="component_derating",
+                summary=f"{ref} exceeds datasheet absolute-max voltage on {max_rail_name} ({max_rail_v:.1f}V > {vin_max:.1f}V)",
+                description=(f"{ref} ({comp['value']}) sees {max_rail_v:.1f}V on {max_rail_name}; datasheet "
+                             f"absolute-max input is {vin_max:.1f}V. Margin {round(margin_pct, 1)}%."),
+                severity="error", confidence="datasheet-backed", evidence_source="datasheet",
+                components=[ref], nets=[max_rail_name],
+                recommendation="Reduce the rail voltage or select a part rated for this rail.",
+                impact="Operating beyond absolute maximum risks immediate device damage.",
+                derating_rule="exceeds_abs_max", rail=max_rail_name, rail_voltage=max_rail_v,
+                abs_max_vin=vin_max, margin_pct=round(margin_pct, 1),
+            ))
         elif margin_pct < 10:
-            derating_issues.append({"ref": ref, "value": comp["value"], "component_type": "ic",
-                                    "rail": max_rail_name, "rail_voltage": max_rail_v,
-                                    "abs_max_vin": vin_max, "margin_pct": round(margin_pct, 1),
-                                    "derating_rule": "ic_10pct_abs_max", "data_source": "extraction_cache",
-                                    "severity": "warning"})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-002",
+                category="component_derating",
+                summary=f"{ref} operates near datasheet absolute-max voltage on {max_rail_name} ({round(margin_pct, 1)}% margin)",
+                description=(f"{ref} ({comp['value']}) sees {max_rail_v:.1f}V on {max_rail_name}; datasheet "
+                             f"absolute-max input is {vin_max:.1f}V. Only {round(margin_pct, 1)}% margin."),
+                severity="warning", confidence="datasheet-backed", evidence_source="datasheet",
+                components=[ref], nets=[max_rail_name],
+                recommendation="Confirm worst-case rail tolerance leaves margin to absolute max.",
+                derating_rule="ic_10pct_abs_max", rail=max_rail_name, rail_voltage=max_rail_v,
+                abs_max_vin=vin_max, margin_pct=round(margin_pct, 1),
+            ))
 
     # ---- Resistor power dissipation check ----
     for comp in components:
@@ -6655,7 +6686,6 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
         rated_power = _RESISTOR_POWER_RATING.get(pkg)
         if not rated_power:
             continue
-        resistors_checked += 1
         max_working_power = rated_power * profile["resistor_power"]
         margin_pct = ((rated_power - power_w) / rated_power) * 100 if rated_power > 0 else 0
         severity = derating_rule = None
@@ -6664,12 +6694,24 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
         elif power_w > max_working_power:
             severity, derating_rule = "warning", "resistor_50pct_power"
         if severity:
-            derating_issues.append({"ref": ref, "value": comp["value"], "component_type": "resistor",
-                                    "rail": pwr_net or n1, "voltage_across": v_across,
-                                    "resistance_ohms": pv, "estimated_power_w": round(power_w, 4),
-                                    "rated_power_w": rated_power, "package": pkg,
-                                    "margin_pct": round(margin_pct, 1), "derating_rule": derating_rule,
-                                    "severity": severity})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-003",
+                category="component_derating",
+                summary=(f"{ref} ({comp['value']}) {'exceeds' if severity == 'critical' else 'has marginal'} "
+                         f"power derating ({power_w*1000:.0f}mW on {rated_power*1000:.0f}mW {pkg})"),
+                description=(f"{ref} dissipates ~{power_w*1000:.0f}mW ({v_across:.1f}V across {pv:.0f}Ω); "
+                             f"{pkg} package rated {rated_power*1000:.0f}mW. Derating rule: {derating_rule}. "
+                             f"Margin {round(margin_pct, 1)}%."),
+                severity="error" if severity == "critical" else "warning",
+                confidence="heuristic", evidence_source="topology",
+                components=[ref], nets=[pwr_net or n1] if (pwr_net or n1) else [],
+                recommendation=("Use a larger package or higher power rating." if severity == "critical"
+                                else "Consider a larger package for power derating margin."),
+                impact="Resistor may overheat or fail open." if severity == "critical" else "",
+                derating_rule=derating_rule, voltage_across=v_across, resistance_ohms=pv,
+                estimated_power_w=round(power_w, 4), rated_power_w=rated_power, package=pkg,
+                margin_pct=round(margin_pct, 1),
+            ))
         elif margin_pct > profile["over_designed_res_margin"] * 100:
             pkg_sizes = ["0201", "0402", "0603", "0805", "1206", "1210", "2010", "2512"]
             suggested_pkg = None
@@ -6682,40 +6724,20 @@ def analyze_voltage_derating(ctx: AnalysisContext, signal_analysis: dict,
             if suggested_pkg and suggested_pkg != pkg:
                 suggestion = (f"Consider {suggested_pkg} package — {pkg} is significantly "
                               f"over-designed ({power_w*1000:.1f}mW vs {rated_power*1000:.0f}mW rated)")
-            over_designed.append({"ref": ref, "value": comp["value"], "component_type": "resistor",
-                                  "package": pkg, "estimated_power_w": round(power_w, 4),
-                                  "rated_power_w": rated_power, "margin_pct": round(margin_pct, 1),
-                                  "suggestion": suggestion})
+            findings.append(make_finding(
+                detector="analyze_voltage_derating", rule_id="VD-004",
+                category="component_derating",
+                summary=f"{ref} ({comp['value']}) package is over-designed ({power_w*1000:.1f}mW in {pkg})",
+                description=f"{ref} dissipates ~{power_w*1000:.1f}mW in a {pkg} ({rated_power*1000:.0f}mW rated) — margin {round(margin_pct, 1)}%.",
+                severity="info", confidence="heuristic", evidence_source="topology",
+                components=[ref], nets=[],
+                recommendation=suggestion or "Consider a smaller package to reduce cost/size.",
+                derating_rule="over_designed", estimated_power_w=round(power_w, 4),
+                rated_power_w=rated_power, package=pkg, margin_pct=round(margin_pct, 1),
+            ))
 
-    # ---- Build result ----
-    total_checked = caps_checked + ics_checked + resistors_checked
-    if not derating_issues and not over_designed and total_checked == 0:
-        return {}
-
-    result: dict = {
-        "derating_profile": derating_profile,
-        "caps_checked": caps_checked, "ics_checked": ics_checked, "resistors_checked": resistors_checked,
-        "issues": derating_issues,
-    }
-    observations = []
-    cap_critical = [i for i in derating_issues if i.get("component_type") == "capacitor" and i["severity"] == "critical"]
-    cap_warnings = [i for i in derating_issues if i.get("component_type") == "capacitor" and i["severity"] == "warning"]
-    ic_issues = [i for i in derating_issues if i.get("component_type") == "ic"]
-    res_issues = [i for i in derating_issues if i.get("component_type") == "resistor"]
-    if cap_critical:
-        observations.append(f"{len(cap_critical)} cap(s) exceed rated voltage — risk of failure")
-    if cap_warnings:
-        observations.append(f"{len(cap_warnings)} cap(s) have insufficient voltage derating margin")
-    if ic_issues:
-        observations.append(f"{len(ic_issues)} IC(s) operating near or beyond absolute maximum voltage")
-    if res_issues:
-        observations.append(f"{len(res_issues)} resistor(s) exceed power derating limit")
-    if over_designed:
-        result["over_designed"] = over_designed
-        observations.append(f"{len(over_designed)} component(s) significantly over-designed — potential cost/size optimization")
-    if observations:
-        result["observations"] = observations
-    return result
+    # ---- Return findings ----
+    return findings
 
 
 def analyze_protocol_compliance(components: list[dict], nets: dict,
@@ -8996,6 +9018,10 @@ def analyze_schematic(path: str, project_root: str | None = None,
     if nt_findings:
         findings.extend(nt_findings)
 
+    # VD-001..004 — component voltage/power derating (rich findings since v1.4)
+    if voltage_derating:
+        findings.extend(voltage_derating)
+
     # Build severity summary
     sev_counts = {"error": 0, "warning": 0, "info": 0}
     for _f in findings:
@@ -9070,8 +9096,6 @@ def analyze_schematic(path: str, project_root: str | None = None,
         result["pdn_impedance"] = pdn_analysis
     if sleep_current:
         result["sleep_current_audit"] = sleep_current
-    if voltage_derating:
-        result["voltage_derating"] = voltage_derating
     if power_budget:
         result["power_budget"] = power_budget
     if power_sequencing:

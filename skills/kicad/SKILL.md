@@ -367,7 +367,7 @@ bom, components, nets, subcircuits, ic_pin_analysis, design_analysis,
 connectivity_issues, hierarchy_context, hierarchy_warning,
 net_classifications, rail_voltages
 ```
-Optional (present when non-empty): `pdn_impedance`, `sleep_current_audit`, `voltage_derating`, `power_budget`, `power_sequencing`, `bom_optimization`, `test_coverage`, `assembly_complexity`, `usb_compliance`, `inrush_analysis`, `sheets` (multi-sheet only), `missing_info`, `bom_lock`, `project_settings`
+Optional (present when non-empty): `pdn_impedance`, `sleep_current_audit`, `power_budget`, `power_sequencing`, `bom_optimization`, `test_coverage`, `assembly_complexity`, `usb_compliance`, `inrush_analysis`, `sheets` (multi-sheet only), `missing_info`, `bom_lock`, `project_settings`
 
 Key nested structures:
 - `statistics`: `{total_components, unique_parts, dnp_parts, total_nets, total_wires, total_no_connects, component_types, power_rails, missing_mpn, ...}`

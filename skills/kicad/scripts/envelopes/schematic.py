@@ -341,8 +341,6 @@ class SchematicEnvelope:
         "description": "Validated power tree with provenance."})
     pdn_impedance: Optional[dict] = field(default=None, metadata={
         "description": "PDN impedance analysis per rail."})
-    voltage_derating: Optional[dict] = field(default=None, metadata={
-        "description": "Capacitor/component voltage derating audit."})
     usb_compliance: Optional[dict] = field(default=None, metadata={
         "description": "USB compliance checks."})
     inrush_analysis: Optional[dict] = field(default=None, metadata={
