@@ -7,6 +7,9 @@ read it and embed only a capability_mode_ref pointer in their envelopes.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +17,22 @@ from run_id import generate_run_id
 
 
 CAPABILITY_MODE_FILENAME = "capability_mode.json"
+
+
+def _read_capability_mode(path: Path) -> Optional[dict]:
+    """Read an existing capability_mode.json, tolerating a transient
+    partial read from a racing writer.
+
+    Returns the parsed record, or None if the file can't be read as valid
+    JSON after a few short retries (caller then falls through to write its
+    own — the atomic os.replace below makes the file self-heal).
+    """
+    for _ in range(5):
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, FileNotFoundError, OSError):
+            time.sleep(0.005)
+    return None
 
 
 def _detect_datasheet_status(cache_dir: Optional[Path] = None) -> str:
@@ -78,7 +97,12 @@ def get_or_create_capability_mode(
     analysis_dir = Path(analysis_dir)
     path = analysis_dir / CAPABILITY_MODE_FILENAME
     if path.exists():
-        return json.loads(path.read_text())
+        existing = _read_capability_mode(path)
+        if existing is not None:
+            return existing
+        # exists() is True but the file isn't valid JSON yet — a racing
+        # writer is mid-create. Fall through and write our own; the atomic
+        # os.replace below leaves the file in a consistent state regardless.
     record = {
         "run_id": generate_run_id(),
         "datasheet_extraction": datasheet_extraction or _detect_datasheet_status(cache_dir),
@@ -91,7 +115,32 @@ def get_or_create_capability_mode(
         "tier_map": {},
     }
     analysis_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    # Atomic create: stage the full record to a temp file in the same
+    # directory, then os.link() it into place. os.link raises
+    # FileExistsError if the target already exists, so it is an atomic
+    # exclusive-create — this gives BOTH guarantees the old non-atomic
+    # write_text() lacked:
+    #   1. no partial read — the content is fully written before linking,
+    #      so a concurrent reader never sees a half-written file (the old
+    #      code could crash a reader with JSONDecodeError mid-write);
+    #   2. true first-writer-wins — if two analyzers race past the
+    #      exists() check above, exactly one os.link() succeeds; the loser
+    #      reads the winner's record, so every analyzer in the run shares
+    #      one run_id (HI-7).
+    fd, tmp_path = tempfile.mkstemp(dir=analysis_dir, prefix=".capmode-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+        try:
+            os.link(tmp_path, path)
+        except FileExistsError:
+            # Another analyzer won the race — return its record, not ours.
+            return _read_capability_mode(path) or record
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
     return record
 
 
