@@ -283,7 +283,7 @@ All analyzers produce a uniform output envelope:
     "trust_summary": {
         "total_findings": 42,
         "trust_level": "high|mixed|low",
-        "by_confidence": {"deterministic": 20, "heuristic": 18, "datasheet-backed": 4},
+        "by_confidence": {"deterministic": 20, "heuristic": 18, "datasheet_backed": 4},
         "by_evidence_source": {"datasheet": 4, "topology": 10, "heuristic_rule": 18, ...},
         "provenance_coverage_pct": 96.5
     }

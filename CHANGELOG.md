@@ -316,6 +316,40 @@ Track 1.3 (structured provenance block) builds on this typed SOT foundation.
 
 ---
 
+## v1.3.1 — 2026-05-11
+
+**Theme: Bug fixes + PCB connectivity rewrite** — a patch release closing
+issues reported against v1.3.0 and reworking the PCB copper-connectivity model.
+
+### Fixes
+
+- **`format-report.py` crash on dict-shaped `power_rails`** (#16, #20) — the
+  report formatter assumed `power_rails` was a list of strings; it now handles
+  the dict form emitted for rails with metadata.
+- **KH-147 — LED-driver false positive** — `detect_led_drivers` flagged a
+  current resistor as a current-limiting LED resistor even when its value
+  string carried an unparseable suffix (e.g. `215k_0402_<MPN>` from importers
+  that append package/MPN tags). An unparseable value now means "can't confirm
+  the current-limiting role — skip" rather than a false finding.
+- **Pad rotation sign** — corrected the rotation sign convention in PCB
+  footprint parsing; **analysis-dir resolution** unified across analyzers.
+
+### Changes
+
+- **PCB connectivity rewrite** — `pcb_connectivity.py` reworked to a
+  track-as-node model with compound-pad handling and `*.Cu` layer wildcards,
+  improving island detection and plane-split accuracy.
+- **`.kicad_pro` `top_level_sheets` support** (#19) — flat multi-page projects
+  imported from Altium (which list pages in `top_level_sheets` rather than a
+  sheet hierarchy) are now analyzed across all pages.
+- **Python 3.10 minimum** — the v1.4 floor lands early in this patch; install
+  guidance added for Claude Code, Codex, and Gemini.
+
+#### Breaking changes
+None.
+
+---
+
 ## v1.3.0 — 2026-04-16
 
 **Theme: Harmonized Analysis + Trust Infrastructure** — 168 commits making every analyzer speak the same format, every finding carry its own provenance, and the whole pipeline uniformly queryable, filterable, and auditable.
