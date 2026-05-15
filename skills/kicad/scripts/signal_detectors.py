@@ -321,6 +321,7 @@ def detect_voltage_dividers(ctx: AnalysisContext) -> dict:
                     }
 
                     # Check if mid-point connects to a known feedback pin
+                    is_feedback = False
                     if mid_net in ctx.nets:
                         mid_pins = [p for p in ctx.nets[mid_net]["pins"]
                                     if p["component"] != r_top_ref
@@ -347,7 +348,13 @@ def detect_voltage_dividers(ctx: AnalysisContext) -> dict:
                                     divider["report_context"] = {"section": "Voltage Dividers", "impact": "", "standard_ref": ""}
                                     divider["provenance"] = make_provenance("vd_two_resistor", "deterministic", [r_top_ref, r_bot_ref])
                                     feedback_networks.append(divider)
+                                    is_feedback = True
                                     break
+
+                    # Feedback dividers belong to feedback_networks only — don't double-emit
+                    # into voltage_dividers (the findings flattener picks up both lists).
+                    if is_feedback:
+                        continue
 
                     # Classify divider purpose from connected pin names
                     divider["purpose"] = _classify_divider_purpose(divider)

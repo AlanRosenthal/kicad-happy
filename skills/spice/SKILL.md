@@ -40,7 +40,7 @@ This skill inverts the typical simulation workflow: instead of requiring users t
   - **LTspice** — free from analog.com/ltspice. Popular on Windows, works via wine on Linux.
   - **Xyce** — from xyce.sandia.gov. Parallel SPICE for large circuits.
   - Override with `--simulator ngspice|ltspice|xyce` or `SPICE_SIMULATOR` env var.
-- **Python 3.8+** — stdlib only, no pip dependencies
+- **Python 3.10+** — stdlib only, no pip dependencies
 - **Schematic analyzer JSON** — from `analyze_schematic.py --output`
 
 If no simulator is installed, skip simulation gracefully and note it in the report. Do not treat a missing simulator as an error — it's an optional enhancement.

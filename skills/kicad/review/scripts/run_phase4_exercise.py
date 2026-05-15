@@ -116,7 +116,7 @@ def step_1_run_layer1_analyzers(fixture_dir: Path):
         _run([py, "skills/kicad/scripts/cross_analysis.py",
               "--schematic", str(analysis_dir / "schematic.json"),
               "--pcb", str(analysis_dir / "pcb.json"),
-              "--output", str(analysis_dir / "cross.json")])
+              "--output", str(analysis_dir / "cross_analysis.json")])
     else:
         print("  pcb missing → skipping pcb/thermal/emc/cross analyzers")
     print("[step 1] OK — Layer 1 outputs in", analysis_dir)

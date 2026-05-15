@@ -33,7 +33,7 @@ Automated EMC risk analysis for KiCad PCB designs. Identifies the most common ca
 
 ## Requirements
 
-- **Python 3.8+** — stdlib only, no pip dependencies
+- **Python 3.10+** — stdlib only, no pip dependencies
 - **Schematic analyzer JSON** — from `analyze_schematic.py --output`
 - **PCB analyzer JSON** — from `analyze_pcb.py --full --output` (recommended with `--full`)
 - **SPICE simulator** *(optional)* — ngspice, LTspice, or Xyce for SPICE-enhanced PDN/filter checks. Auto-detected. Without one, analytical models run unchanged.

@@ -1676,6 +1676,9 @@ def compute_statistics(components: list[dict], nets: dict, bom: list[dict],
     power_rails = []
     for name in power_rail_names:
         clean = _clean_hierarchical_name(name)
+        # Skip PWR_FLAG — it's an ERC directive, not a physical rail.
+        if clean == "PWR_FLAG":
+            continue
         v = _parse_voltage_from_net_name(clean)
         power_rails.append({"name": clean, "voltage": v})
 
@@ -9250,6 +9253,22 @@ def main():
     except ImportError:
         config = {"version": 1, "project": {}, "suppressions": []}
 
+    # Resolve canonical analysis_dir ONCE — used for both AnalysisContext
+    # (Phase 4d-active) and capability_mode_ref (Phase 4 §3.3). This must
+    # be the same path so `--analysis-dir X` writes outputs AND capability
+    # mode to the same X, not to ./analysis (audit Highest-Risk #4).
+    if args.analysis_dir:
+        _analysis_dir_for_ctx = Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir_for_ctx = Path(args.output).parent
+    else:
+        _analysis_dir_for_ctx = Path("analysis")
+
+    # Resolve capability_mode_ref BEFORE build_inputs so inputs.run_id ==
+    # capability_mode_ref.run_id (Phase 4 spec §3.3, audit Highest-Risk #5).
+    # First-writer-wins side effect: creates capability_mode.json if absent.
+    _capability_mode_ref = get_capability_mode_ref(_analysis_dir_for_ctx)
+
     # Build inputs provenance block (Track 1.3).
     _sch_path = Path(args.schematic)
     if args.config:
@@ -9260,17 +9279,9 @@ def main():
     inputs = build_inputs(
         source_files=[_sch_path],
         config_path=_cfg_path,
+        run_id=_capability_mode_ref["run_id"],
     )
     compat = build_compat()
-
-    # Resolve analysis_dir BEFORE calling analyze_schematic so AnalysisContext
-    # can populate design_context from analysis/design_context.json (Phase 4d-active).
-    if args.analysis_dir:
-        _analysis_dir_for_ctx = Path(args.analysis_dir)
-    elif args.output:
-        _analysis_dir_for_ctx = Path(args.output).parent
-    else:
-        _analysis_dir_for_ctx = Path("analysis")
 
     result = analyze_schematic(args.schematic,
                                project_root=args.project_root,
@@ -9403,9 +9414,9 @@ def main():
         print(format_text(result.get('findings', []), args.audience or 'designer', args.stage))
         sys.exit(0)
 
-    # Wire capability_mode_ref (Phase 4 spec §3.3).
-    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
-    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
+    # Wire capability_mode_ref (Phase 4 spec §3.3). Already resolved early
+    # so inputs.run_id and capability_mode_ref.run_id match.
+    result["capability_mode_ref"] = _capability_mode_ref
 
     indent = None if args.compact else 2
     output = json.dumps(result, indent=indent, default=str)

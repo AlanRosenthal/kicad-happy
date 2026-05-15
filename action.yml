@@ -77,6 +77,7 @@ runs:
         INPUT_DERATING_PROFILE: ${{ inputs.derating-profile }}
         INPUT_SPICE: ${{ inputs.spice }}
         INPUT_DATASHEETS_DIR: ${{ inputs.datasheets-dir }}
+        INPUT_DIFF_BASE: ${{ inputs.diff-base }}
         DIGIKEY_CLIENT_ID: ${{ inputs.digikey-client-id }}
         DIGIKEY_CLIENT_SECRET: ${{ inputs.digikey-client-secret }}
         MOUSER_SEARCH_API_KEY: ${{ inputs.mouser-api-key }}

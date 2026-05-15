@@ -30,7 +30,7 @@ import sys
 # value_fields: numeric/string fields to compare for changes
 
 from detection_schema import SCHEMAS as _SCHEMAS
-from finding_schema import group_findings_by_detection_type
+from finding_schema import group_findings_by_detection_type, normalize_severity
 
 # SIGNAL_REGISTRY is derived from the unified detection schema.
 # Kept as a module-level name for backward compat (validate_signal_registry, _diff_items).
@@ -841,7 +841,7 @@ def classify_severity(analyzer_type, diff_result):
     if not diff_result:
         return "none"
 
-    # Breaking: SPICE pass->fail, new EMC CRITICAL, new ERC warnings
+    # Breaking: SPICE pass->fail, new EMC error-severity findings, new ERC warnings
     if analyzer_type == "spice":
         for sc in diff_result.get("status_changes", []):
             if sc.get("base_status") == "pass" and sc.get("head_status") == "fail":
@@ -849,7 +849,8 @@ def classify_severity(analyzer_type, diff_result):
 
     if analyzer_type == "emc":
         for f in diff_result.get("findings", {}).get("new", []):
-            if f.get("severity") == "CRITICAL":
+            # Accept v1.4 error and legacy CRITICAL (both map to "error" via normalize).
+            if normalize_severity(f.get("severity")) == "error":
                 return "breaking"
 
     if analyzer_type == "schematic":
@@ -912,14 +913,15 @@ def classify_regressions(analyzer_type, diff_result):
             })
 
     elif analyzer_type == "emc":
-        # New critical/high findings
+        # New error-severity findings (v1.4 collapsed CRITICAL/HIGH into "error").
+        # Legacy CRITICAL/HIGH still normalize to "error" via normalize_severity.
         for f in diff_result.get("findings", {}).get("new", []):
-            sev = f.get("severity", "").upper()
-            if sev in ("CRITICAL", "HIGH"):
+            raw_sev = f.get("severity", "")
+            if normalize_severity(raw_sev) == "error":
                 regressions.append({
                     "category": "emc",
-                    "severity": "breaking" if sev == "CRITICAL" else "major",
-                    "detail": f"New EMC finding: {f.get('rule_id', '?')} ({sev})",
+                    "severity": "breaking",
+                    "detail": f"New EMC finding: {f.get('rule_id', '?')} ({raw_sev})",
                 })
         # Risk score increase
         risk = diff_result.get("risk_score", {})

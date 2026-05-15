@@ -384,6 +384,10 @@ def check_return_path_coverage(pcb: Dict, severity_threshold: str = 'all') -> Li
                 'If a split is intentional, add a bridge capacitor across the gap.'
             ),
             confidence='heuristic',
+            signal_net=net_name,
+            coverage_pct=round(coverage, 1),
+            trace_mm=round(trace_mm, 2),
+            is_high_speed_or_clock=is_hs,
         ))
 
     return findings
@@ -2959,8 +2963,12 @@ def check_thermal_emc(pcb: Optional[Dict],
         # Find ferrite beads
         for fp in footprints:
             ref = fp.get('reference', '')
-            val = fp.get('value', '').lower()
-            lib = fp.get('library', fp.get('lib_id', '')).lower()
+            # KH-326: coerce malformed upstream value (rare parser edge case
+            # where fp_text value has no text body) to empty string.
+            _raw_val = fp.get('value', '')
+            val = _raw_val.lower() if isinstance(_raw_val, str) else ''
+            _raw_lib = fp.get('library', fp.get('lib_id', ''))
+            lib = _raw_lib.lower() if isinstance(_raw_lib, str) else ''
             is_ferrite = ref.startswith('FB') or ('ferrite' in val) or ('bead' in val) or ('ferrite' in lib)
             if not is_ferrite:
                 continue
@@ -3250,6 +3258,19 @@ def check_pdn_impedance(pcb: Optional[Dict],
                     spice_backend, sweep_before=sweep),
                 confidence='datasheet-backed' if spice_verified else 'heuristic',
                 spice_verified=spice_verified,
+                rail=output_rail,
+                target_impedance_ohm=round(z_target, 4),
+                vout_v=vout,
+                transient_amps=round(i_transient, 3),
+                method='spice' if spice_verified else 'analytical',
+                peak_frequency_hz=round(exceeding[0]['freq_mhz'] * 1e6),
+                peak_impedance_ohm=round(exceeding[0]['impedance_ohm'], 4),
+                exceeding_peaks=[
+                    {'frequency_hz': round(p['freq_mhz'] * 1e6),
+                     'impedance_ohm': round(p['impedance_ohm'], 4)}
+                    for p in exceeding
+                ],
+                decoupling_cap_count=len(cap_models),
             ))
         elif peaks:
             # Peaks exist but don't exceed target — INFO
@@ -3269,6 +3290,15 @@ def check_pdn_impedance(pcb: Optional[Dict],
                 recommendation='PDN impedance is within target. No action needed.',
                 confidence='datasheet-backed' if spice_verified else 'heuristic',
                 spice_verified=spice_verified,
+                rail=output_rail,
+                target_impedance_ohm=round(z_target, 4),
+                method='spice' if spice_verified else 'analytical',
+                peaks=[
+                    {'frequency_hz': round(p['freq_mhz'] * 1e6),
+                     'impedance_ohm': round(p['impedance_ohm'], 4)}
+                    for p in peaks
+                ],
+                decoupling_cap_count=len(cap_models),
             ))
 
     return findings

@@ -614,9 +614,12 @@ def extract_footprints(root: list) -> list[dict]:
             for ft in find_all(fp, "fp_text"):
                 if len(ft) >= 3:
                     if ft[1] == "reference":
-                        ref = ft[2]
+                        # Some footprints have no text after the field name —
+                        # ft[2] is then an attribute s-expression, not a string.
+                        # Coerce to empty string in that case (KH-326).
+                        ref = ft[2] if isinstance(ft[2], str) else ""
                     elif ft[1] == "value":
-                        value = ft[2]
+                        value = ft[2] if isinstance(ft[2], str) else ""
 
         mpn = get_property(fp, "MPN") or get_property(fp, "Mfg Part") or ""
 
@@ -6475,6 +6478,19 @@ def main():
         config = {"version": 1, "project": {}, "suppressions": []}
 
     # Build inputs provenance block (Track 1.3).
+    # Resolve canonical analysis_dir ONCE (used for capability_mode_ref).
+    # Includes --analysis-dir, fixing audit Highest-Risk #4 (split with output).
+    if args.analysis_dir:
+        _analysis_dir = Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir = Path(args.output).parent
+    else:
+        _analysis_dir = Path("analysis")
+
+    # Resolve capability_mode_ref BEFORE build_inputs so inputs.run_id ==
+    # capability_mode_ref.run_id (audit Highest-Risk #5).
+    _capability_mode_ref = get_capability_mode_ref(_analysis_dir)
+
     _pcb_path = Path(args.pcb)
     if args.config:
         _cfg_path = Path(args.config) if Path(args.config).is_file() else None
@@ -6484,6 +6500,7 @@ def main():
     inputs = build_inputs(
         source_files=[_pcb_path],
         config_path=_cfg_path,
+        run_id=_capability_mode_ref["run_id"],
     )
     compat = build_compat()
 
@@ -6575,8 +6592,8 @@ def main():
         sys.exit(0)
 
     # Wire capability_mode_ref (Phase 4 spec §3.3).
-    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
-    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
+    # capability_mode_ref already resolved early — reuse to keep run_id stable.
+    result["capability_mode_ref"] = _capability_mode_ref
 
     indent = None if args.compact else 2
     output = json.dumps(result, indent=indent, default=str)

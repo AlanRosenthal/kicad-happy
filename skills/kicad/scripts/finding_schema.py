@@ -64,6 +64,44 @@ def _derive_finding_id(*, source, rule_id, detection_id, components, nets, pins,
 
 
 _SEVERITY_ORDER = ("info", "warning", "error")
+
+_SEVERITY_NORMALIZE = {
+    # Legacy uppercase pre-v1.3 taxonomy
+    "CRITICAL": "error",
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "info",
+    "INFO": "info",
+    # Lowercase legacy variants
+    "critical": "error",
+    "high": "error",
+    "medium": "warning",
+    "low": "info",
+    # v1.4 normalized vocab (pass-through)
+    "error": "error",
+    "warning": "warning",
+    "info": "info",
+}
+
+
+def normalize_severity(sev):
+    """Map any severity string to the v1.4 normalized vocabulary.
+
+    Accepts legacy uppercase (CRITICAL/HIGH/MEDIUM/LOW/INFO) and v1.4
+    lowercase (error/warning/info). Returns one of {"error", "warning",
+    "info"}. Returns "info" for None, non-string, or unknown input.
+
+    Use this anywhere a consumer reads `finding["severity"]` — analyzer
+    outputs may carry either taxonomy depending on the producer code
+    path (EMC + voltage_derating still emit legacy uppercase via
+    _normalize_severity, schematic+pcb+thermal emit v1.4 lowercase).
+    """
+    if not isinstance(sev, str):
+        return "info"
+    return _SEVERITY_NORMALIZE.get(
+        sev, _SEVERITY_NORMALIZE.get(sev.upper(), "info"))
+
+
 _TUNING_CACHE = None
 _TUNING_PATH = Path(__file__).resolve().parents[2] / "kicad" / "review" / "severity_tuning.json"
 

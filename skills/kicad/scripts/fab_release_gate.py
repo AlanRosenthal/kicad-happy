@@ -21,6 +21,8 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
+from finding_schema import normalize_severity
+
 
 GATE_VERSION = "1.0"
 
@@ -283,18 +285,20 @@ def check_thermal(thermal_data: Optional[Dict]) -> List[Dict]:
 
     findings = thermal_data.get("findings", [])
     active = [f for f in findings if not f.get("suppressed")]
-    crits = [f for f in active if f.get("severity") == "CRITICAL"]
-    highs = [f for f in active if f.get("severity") == "HIGH"]
+    # Accept both v1.4 (error/warning/info) and legacy (CRITICAL/HIGH/MEDIUM/LOW)
+    # severities so cached pre-v1.4 thermal outputs still gate correctly.
+    errors = [f for f in active if normalize_severity(f.get("severity")) == "error"]
+    warnings = [f for f in active if normalize_severity(f.get("severity")) == "warning"]
 
-    if crits:
-        refs = [f.get("components", ["?"])[0] for f in crits[:3]]
+    if errors:
+        refs = [f.get("components", ["?"])[0] for f in errors[:3]]
         return [_check("thermal", "thermal_risk", "fail",
-                        f"{len(crits)} CRITICAL thermal finding(s): {', '.join(refs)}",
-                        {"critical_count": len(crits), "high_count": len(highs)})]
-    elif highs:
+                        f"{len(errors)} error-severity thermal finding(s): {', '.join(refs)}",
+                        {"error_count": len(errors), "warning_count": len(warnings)})]
+    elif warnings:
         return [_check("thermal", "thermal_risk", "warn",
-                        f"{len(highs)} HIGH thermal finding(s)",
-                        {"high_count": len(highs)})]
+                        f"{len(warnings)} warning-severity thermal finding(s)",
+                        {"warning_count": len(warnings)})]
     else:
         score = thermal_data.get("summary", {}).get("thermal_score", "?")
         return [_check("thermal", "thermal_risk", "pass",

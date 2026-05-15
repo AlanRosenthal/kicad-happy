@@ -946,6 +946,12 @@ def main():
         help="Output file path (default: stdout)",
     )
     parser.add_argument(
+        "--analysis-dir",
+        help="Write lifecycle.json to this directory (analysis folder convention). "
+             "Routes the output through the current run via the manifest, matching "
+             "every other analyzer. Ignored if --output is also passed.",
+    )
+    parser.add_argument(
         "--only",
         help="Query only specific sources (comma-separated: digikey,mouser,lcsc,element14)",
     )
@@ -1007,10 +1013,33 @@ def main():
 
     # Output
     output_json = json.dumps(result, indent=2)
-    if args.output:
-        with open(args.output, "w") as f:
+    output_path = args.output
+    analysis_dir_mode = (not output_path
+                         and hasattr(args, "analysis_dir")
+                         and args.analysis_dir)
+
+    if analysis_dir_mode:
+        import tempfile
+        from analysis_cache import overwrite_current, CANONICAL_OUTPUTS, get_current_run
+        analysis_dir = args.analysis_dir
+        if not os.path.isabs(analysis_dir):
+            analysis_dir = os.path.abspath(analysis_dir)
+        filename = CANONICAL_OUTPUTS.get("lifecycle", "lifecycle.json")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_out = os.path.join(tmp_dir, filename)
+            with open(tmp_out, "w") as f:
+                f.write(output_json)
+            overwrite_current(analysis_dir, tmp_dir, source_hashes=None)
+        current = get_current_run(analysis_dir)
+        if current:
+            out_path = os.path.join(current[0], filename)
+        else:
+            out_path = os.path.join(analysis_dir, filename)
+        print(f"Audit written to {out_path}", file=sys.stderr)
+    elif output_path:
+        with open(output_path, "w") as f:
             f.write(output_json)
-        print(f"Audit written to {args.output}", file=sys.stderr)
+        print(f"Audit written to {output_path}", file=sys.stderr)
     else:
         print(output_json)
 

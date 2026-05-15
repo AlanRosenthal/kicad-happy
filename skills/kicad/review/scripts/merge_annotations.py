@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 SCHEMA_PATH = REPO_ROOT / "skills" / "kicad" / "review" / "schemas" / "review_annotations.schema.json"
 
 ANALYZER_FILES = ["schematic.json", "pcb.json", "emc.json", "thermal.json",
-                   "gerber.json", "cross.json"]
+                   "gerber.json", "cross_analysis.json"]
 SUPPRESSION_RATE_CAP = 0.30  # HI-8 30% cap
 
 

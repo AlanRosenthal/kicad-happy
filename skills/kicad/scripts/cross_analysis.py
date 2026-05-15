@@ -412,6 +412,10 @@ def check_cross_validation(schematic: dict, pcb: dict | None) -> list[dict]:
     for ref in sch_refs & pcb_refs:
         sch_val = sch_comp_map.get(ref, {}).get('value', '')
         pcb_val = pcb_fp_map.get(ref, {}).get('value', '')
+        # KH-326: skip cross-check if either value is malformed (not a string).
+        # Parser edge case in analyze_pcb.py footprint parsing can yield a list.
+        if not isinstance(sch_val, str) or not isinstance(pcb_val, str):
+            continue
         if sch_val and pcb_val and sch_val != pcb_val:
             if sch_val.replace(' ', '') == pcb_val.replace(' ', ''):
                 continue
@@ -965,9 +969,22 @@ def main():
     if pcb is not None and args.pcb:
         _upstream_artifacts["pcb"] = build_upstream_artifact(_Path(args.pcb), pcb)
         _source_files.append(_Path(args.pcb))
+
+    # Resolve canonical analysis_dir ONCE (audit Highest-Risk #4).
+    if args.analysis_dir:
+        _analysis_dir = _Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir = _Path(args.output).parent
+    else:
+        _analysis_dir = _Path("analysis")
+
+    # Resolve capability_mode_ref BEFORE build_inputs (audit Highest-Risk #5).
+    _capability_mode_ref = get_capability_mode_ref(_analysis_dir)
+
     inputs = build_inputs(
         source_files=_source_files,
         upstream_artifacts=_upstream_artifacts,
+        run_id=_capability_mode_ref["run_id"],
     )
     compat = build_compat()
 
@@ -994,10 +1011,9 @@ def main():
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
 
-    # Wire capability_mode_ref (Phase 4 spec §3.3).
-    from pathlib import Path as _Path
-    _analysis_dir = _Path(args.output).parent if args.output else _Path("analysis")
-    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
+    # Wire capability_mode_ref (Phase 4 spec §3.3). Resolved early so
+    # inputs.run_id and capability_mode_ref.run_id match.
+    result["capability_mode_ref"] = _capability_mode_ref
 
     if args.text:
         from output_filters import format_text

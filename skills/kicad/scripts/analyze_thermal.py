@@ -958,10 +958,26 @@ def main():
     _cfg_path = _Path(args.config) if args.config else None
     if _cfg_path and not _cfg_path.is_file():
         _cfg_path = None
+
+    # Resolve canonical analysis_dir ONCE (audit Highest-Risk #4) — include
+    # --analysis-dir branch so capability mode lands with outputs, not in
+    # ./analysis fallback.
+    if hasattr(args, "analysis_dir") and args.analysis_dir:
+        _analysis_dir = _Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir = _Path(args.output).parent
+    else:
+        _analysis_dir = _Path("analysis")
+
+    # Resolve capability_mode_ref BEFORE build_inputs so inputs.run_id ==
+    # capability_mode_ref.run_id (audit Highest-Risk #5).
+    _capability_mode_ref = get_capability_mode_ref(_analysis_dir)
+
     inputs = build_inputs(
         source_files=[_sch_path, _pcb_path],
         upstream_artifacts=_upstream_artifacts,
         config_path=_cfg_path,
+        run_id=_capability_mode_ref["run_id"],
     )
     compat = build_compat()
 
@@ -1065,8 +1081,8 @@ def main():
 
     # Wire capability_mode_ref (Phase 4 spec §3.3).
     from pathlib import Path as _Path
-    _analysis_dir = _Path(args.output).parent if args.output else _Path("analysis")
-    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
+    # capability_mode_ref already resolved early — reuse to keep run_id stable.
+    result["capability_mode_ref"] = _capability_mode_ref
 
     # Determine output path
     output_path = args.output

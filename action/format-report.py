@@ -18,7 +18,23 @@ _kicad_scripts = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 if os.path.isdir(_kicad_scripts):
     sys.path.insert(0, os.path.abspath(_kicad_scripts))
 
-from finding_schema import Det, group_findings
+from finding_schema import Det, group_findings, normalize_severity
+
+
+# Icon glyphs by normalized severity (v1.4 vocab). Used by raw-finding renderers
+# that read a finding's severity directly. Use _sev_icon() rather than reading
+# the dict to keep the mapping centralized.
+_SEV_ICON = {
+    "error":   "\U0001f534",  # 🔴
+    "warning": "⚠️",  # ⚠️
+    "info":    "\U0001f7e1",  # 🟡
+}
+
+
+def _sev_icon(raw_sev):
+    """Return the display icon for a finding's severity, accepting both
+    legacy uppercase (CRITICAL/HIGH/MEDIUM/LOW) and v1.4 (error/warning/info)."""
+    return _SEV_ICON.get(normalize_severity(raw_sev), "\U0001f7e1")
 
 
 def _load_json(path):
@@ -101,7 +117,7 @@ def _render_top_risks(emc, thermal):
         L.append("")
         for f in items:
             sev = f.get("severity", "?")
-            icon = "\U0001f534" if sev == "CRITICAL" else "\u26a0\ufe0f" if sev == "HIGH" else "\U0001f7e1"
+            icon = _sev_icon(sev)
             conf = f.get("confidence", "")
             conf_badge = f" `{conf}`" if conf else ""
             source = f.get("source", "")
@@ -458,7 +474,7 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
         emc_high = emc_summary.get("high", 0)
         emc_checks = emc_summary.get("total_checks", 0)
         if emc_crit > 0:
-            findings.append(("CRITICAL", f"EMC: {emc_crit} critical finding(s) — score {emc_score}/100", "emc"))
+            findings.append(("critical", f"EMC: {emc_crit} critical finding(s) — score {emc_score}/100", "emc"))
         if emc_high > 0:
             findings.append(("WARNING", f"EMC: {emc_high} high-risk finding(s)", "emc"))
         if emc_checks > 0 and emc_crit == 0 and emc_high == 0:
@@ -705,11 +721,12 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
             if f.get("suppressed"):
                 continue
             sev = f.get("severity", "")
-            if sev in ("CRITICAL", "HIGH"):
+            # v1.4 collapsed CRITICAL+HIGH into "error". Surface error-severity
+            # EMC findings in the rich report; legacy uppercase normalizes too.
+            if normalize_severity(sev) == "error":
                 rule = f.get("rule_id", "")
                 title = f.get("title", "")
-                icon = "\U0001f534" if sev == "CRITICAL" else "\u26a0\ufe0f"
-                L.append(f"- {icon} {rule}: {title}")
+                L.append(f"- {_sev_icon(sev)} {rule}: {title}")
         L.append("")
 
     # === Thermal Analysis ===
@@ -733,11 +750,12 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
                 if f.get("suppressed"):
                     continue
                 sev = f.get("severity", "")
-                if sev in ("CRITICAL", "HIGH", "MEDIUM"):
+                # Thermal: surface error + warning (legacy CRITICAL/HIGH/MEDIUM
+                # all normalize into these v1.4 buckets).
+                if normalize_severity(sev) in ("error", "warning"):
                     rule = f.get("rule_id", "")
                     title = f.get("title", "")
-                    icon = "\U0001f534" if sev == "CRITICAL" else "\u26a0\ufe0f" if sev == "HIGH" else "\U0001f7e1"
-                    L.append(f"- {icon} {rule}: {title}")
+                    L.append(f"- {_sev_icon(sev)} {rule}: {title}")
             L.append("")
 
         if th_crit == 0 and th_high == 0 and th_total > 0:
@@ -1023,7 +1041,8 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path, derating_
               f"{emc_s.get('medium', 0)} medium")
             a("")
             emc_findings = emc.get("findings", [])
-            actionable = [f for f in emc_findings if f.get("severity") in ("CRITICAL", "HIGH", "MEDIUM")]
+            actionable = [f for f in emc_findings
+                          if normalize_severity(f.get("severity")) in ("error", "warning")]
             if actionable:
                 a("| Severity | Rule | Finding |")
                 a("|----------|------|---------|")

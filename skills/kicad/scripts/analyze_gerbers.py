@@ -1593,7 +1593,21 @@ def main():
                 _gerber_files.append(p)
             elif p.suffix.lower() == ".txt" and _is_excellon_file(p):
                 _gerber_files.append(p)
-    inputs = build_inputs(source_files=_gerber_files)
+    # Resolve canonical analysis_dir ONCE (audit Highest-Risk #4).
+    if args.analysis_dir:
+        _analysis_dir = Path(args.analysis_dir)
+    elif args.output:
+        _analysis_dir = Path(args.output).parent
+    else:
+        _analysis_dir = Path("analysis")
+
+    # Resolve capability_mode_ref BEFORE build_inputs (audit Highest-Risk #5).
+    _capability_mode_ref = get_capability_mode_ref(_analysis_dir)
+
+    inputs = build_inputs(
+        source_files=_gerber_files,
+        run_id=_capability_mode_ref["run_id"],
+    )
     compat = build_compat()
 
     result = analyze_gerbers(args.directory, full=args.full)
@@ -1604,9 +1618,9 @@ def main():
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
 
-    # Wire capability_mode_ref (Phase 4 spec §3.3).
-    _analysis_dir = Path(args.output).parent if args.output else Path("analysis")
-    result["capability_mode_ref"] = get_capability_mode_ref(_analysis_dir)
+    # Wire capability_mode_ref (Phase 4 spec §3.3). Resolved early so
+    # inputs.run_id and capability_mode_ref.run_id match.
+    result["capability_mode_ref"] = _capability_mode_ref
 
     # Determine output path
     output_path = args.output
