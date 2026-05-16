@@ -322,7 +322,10 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
 
     if sch:
         stats = sch.get("statistics", {})
-        filename = Path(sch.get("file", "unknown")).name
+        # v1.4 removed the top-level "file" field; read from inputs.source_files
+        # instead. Falls back to the legacy "file" for cached v1.3.1 envelopes.
+        _src_files = (sch.get("inputs") or {}).get("source_files") or []
+        filename = Path(_src_files[0]).name if _src_files else Path(sch.get("file", "unknown")).name
         rails = stats.get("power_rails", [])
         rail_str = f", {len(rails)} power rails" if rails else ""
         L.append(f"**{filename}** — {stats.get('total_components', 0)} components, "
@@ -433,8 +436,10 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
     elif severity == "warning":
         findings = [f for f in findings if f[0] in ("critical", "warning")]
 
-    critical_count = sum(1 for s, _, _ in findings if s == "critical")
-    warning_count = sum(1 for s, _, _ in findings if s == "warning")
+    # NOTE: critical_count + warning_count computed AFTER all findings appends
+    # (EMC + thermal sections append below). Computing them here used to
+    # silently exclude EMC critical/high findings from the Action's
+    # has-critical / findings-count public outputs (audit F1.2).
 
     # === Collect verified items ===
     for reg in sig.get(Det.POWER_REGULATORS, []):
@@ -476,9 +481,14 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
         if emc_crit > 0:
             findings.append(("critical", f"EMC: {emc_crit} critical finding(s) — score {emc_score}/100", "emc"))
         if emc_high > 0:
-            findings.append(("WARNING", f"EMC: {emc_high} high-risk finding(s)", "emc"))
+            findings.append(("warning", f"EMC: {emc_high} high-risk finding(s)", "emc"))
         if emc_checks > 0 and emc_crit == 0 and emc_high == 0:
             verified.append(f"EMC risk score {emc_score}/100 — no critical/high findings")
+
+    # Count findings AFTER all append paths so EMC/voltage-derating/protocol
+    # entries flow into has-critical / findings-count (audit F1.2).
+    critical_count = sum(1 for s, _, _ in findings if s == "critical")
+    warning_count = sum(1 for s, _, _ in findings if s == "warning")
 
     # === Summary bar ===
     parts = []
@@ -809,12 +819,14 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
 # Full Report (Step Summary)
 # ---------------------------------------------------------------------------
 
-def format_full_report(schematic_path, pcb_path, spice_path, emc_path, derating_profile):
+def format_full_report(schematic_path, pcb_path, spice_path, emc_path,
+                       derating_profile, thermal_path=None):
     """Generate the full step summary — no JSON dumps, all human-readable."""
     sch = _load_json(schematic_path)
     pcb = _load_json(pcb_path)
     spice = _load_json(spice_path)
     emc = _load_json(emc_path)
+    thermal = _load_json(thermal_path)
 
     L = []
     a = L.append
@@ -826,7 +838,10 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path, derating_
     a("# Design Review — Full Report")
     a("")
     if sch:
-        filename = Path(sch.get("file", "unknown")).name
+        # v1.4 removed the top-level "file" field; read from inputs.source_files
+        # instead. Falls back to the legacy "file" for cached v1.3.1 envelopes.
+        _src_files = (sch.get("inputs") or {}).get("source_files") or []
+        filename = Path(_src_files[0]).name if _src_files else Path(sch.get("file", "unknown")).name
         rails = stats.get("power_rails", [])
         a(f"**{filename}** — {stats.get('total_components', 0)} components "
           f"({stats.get('unique_parts', 0)} unique), {stats.get('total_nets', 0)} nets, "
@@ -1250,6 +1265,31 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path, derating_
                   f"| {t.get('via_count',0)} | {t.get('adequacy','')} |")
             a("")
 
+    # === Thermal Analysis ===
+    if thermal:
+        ts = thermal.get("summary", {})
+        th_score = ts.get("thermal_score", 0)
+        th_total = ts.get("total_checks", 0)
+        th_pdiss = ts.get("total_board_dissipation_w", 0)
+        th_suppressed = ts.get("suppressed", 0)
+
+        if th_total > 0:
+            a("### Thermal Analysis")
+            a("")
+            th_sup_str = f", {th_suppressed} suppressed" if th_suppressed else ""
+            a(f"Score **{th_score}/100** — {th_total} checks, "
+              f"total dissipation {th_pdiss:.2f}W{th_sup_str}")
+            a("")
+            for f in thermal.get("findings", []):
+                if f.get("suppressed"):
+                    continue
+                sev = f.get("severity", "")
+                if normalize_severity(sev) in ("error", "warning"):
+                    rule = f.get("rule_id", "")
+                    title = f.get("title", "")
+                    a(f"- {_sev_icon(sev)} {rule}: {title}")
+            a("")
+
     a("---")
     a("*Generated by [kicad-happy](https://github.com/aklofas/kicad-happy)*")
 
@@ -1288,7 +1328,8 @@ def main():
         f.write(report)
 
     if args.output_full:
-        full = format_full_report(args.schematic, args.pcb, args.spice, args.emc, args.derating_profile)
+        full = format_full_report(args.schematic, args.pcb, args.spice, args.emc,
+                                   args.derating_profile, thermal_path=args.thermal)
         with open(args.output_full, "w") as f:
             f.write(full)
         print(f"Full report: {args.output_full} ({len(full)} chars)", file=sys.stderr)
