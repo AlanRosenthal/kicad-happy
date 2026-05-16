@@ -50,26 +50,34 @@ If no simulator is installed, skip simulation gracefully and note it in the repo
 ### Step 1: Run the schematic analyzer
 
 ```bash
-python3 <kicad-skill-path>/scripts/analyze_schematic.py design.kicad_sch --output analysis.json
+python3 <kicad-skill-path>/scripts/analyze_schematic.py design.kicad_sch --analysis-dir analysis/
 ```
 
 ### Step 2: Run SPICE simulations
 
+Pass `--analysis-dir analysis/` — the script auto-resolves `schematic.json`
+from the manifest's current run, writes `spice.json` into the same run
+folder, and parks intermediate `.cir` / `.raw` files at
+`<run>/spice_work/` by default.
+
 ```bash
-# Simulate all supported subcircuit types
+# Recommended: auto-resolve schematic + write spice.json into the current run
+python3 <skill-path>/scripts/simulate_subcircuits.py --analysis-dir analysis/
+
+# Explicit form — positional or --schematic path
 python3 <skill-path>/scripts/simulate_subcircuits.py analysis.json --output sim_report.json
 
 # Simulate specific types only
-python3 <skill-path>/scripts/simulate_subcircuits.py analysis.json --types rc_filters,voltage_dividers
+python3 <skill-path>/scripts/simulate_subcircuits.py --analysis-dir analysis/ --types rc_filters,voltage_dividers
 
-# Keep simulation files for debugging (default: temp dir, cleaned up)
-python3 <skill-path>/scripts/simulate_subcircuits.py analysis.json --workdir ./spice_runs
+# Keep simulation files for debugging (default: <run>/spice_work/ when --analysis-dir is set, else a temp dir)
+python3 <skill-path>/scripts/simulate_subcircuits.py --analysis-dir analysis/ --workdir ./spice_runs
 
 # Increase timeout for complex circuits (default: 5s per subcircuit)
-python3 <skill-path>/scripts/simulate_subcircuits.py analysis.json --timeout 10
+python3 <skill-path>/scripts/simulate_subcircuits.py --analysis-dir analysis/ --timeout 10
 
 # Omit file paths from output (cleaner for reports)
-python3 <skill-path>/scripts/simulate_subcircuits.py analysis.json --compact
+python3 <skill-path>/scripts/simulate_subcircuits.py --analysis-dir analysis/ --compact
 ```
 
 ### Step 2b (optional): PCB parasitic-aware simulation

@@ -50,12 +50,16 @@ python3 <kicad-skill-path>/scripts/analyze_pcb.py design.kicad_pcb --full --anal
 
 ### Step 2: Run EMC analysis
 
-Point `--schematic` and `--pcb` at the current run's JSONs and pass
-`--analysis-dir analysis/` so `emc.json` co-locates with them and gets tracked
-in the manifest:
+Pass `--analysis-dir analysis/` — the script auto-resolves `schematic.json`
+and `pcb.json` from the manifest's current run, and writes `emc.json` into
+the same folder so the manifest tracks it.
 
 ```bash
-# Recommended: integrate into the current run
+# Recommended: auto-resolve inputs from the current run
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/
+
+# Equivalent — explicit paths still accepted (and required if you want to
+# point at a non-current run or override one input)
 python3 <skill-path>/scripts/analyze_emc.py \
     --schematic analysis/<run_id>/schematic.json \
     --pcb analysis/<run_id>/pcb.json \
@@ -65,19 +69,19 @@ python3 <skill-path>/scripts/analyze_emc.py \
 python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --output emc.json
 
 # SPICE-enhanced (improved PDN and filter accuracy)
-python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --spice-enhanced
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/ --spice-enhanced
 
 # Select target standard
-python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --standard cispr-class-b
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/ --standard cispr-class-b
 
 # Select target market (sets all applicable standards)
-python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --market eu
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/ --market eu
 
 # Filter by severity
-python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --severity high
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/ --severity high
 
 # Human-readable text output
-python3 <skill-path>/scripts/analyze_emc.py --schematic schematic.json --pcb pcb.json --text
+python3 <skill-path>/scripts/analyze_emc.py --analysis-dir analysis/ --text
 ```
 
 ### Step 3: Interpret results

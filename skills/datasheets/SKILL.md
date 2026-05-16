@@ -5,6 +5,19 @@ description: Extract structured specifications from electronic component datashe
 
 # Datasheets Skill
 
+## Related Skills
+
+| Skill | Relationship |
+|-------|--------------|
+| `digikey` / `mouser` / `lcsc` / `element14` | **Producers** — download the PDFs under `<project>/datasheets/` that this skill extracts from |
+| `kicad` | **Primary consumer** — VM-001/PU-001/FS-001/PP-001/LR-001/XT-001 + Phase 4b lookup detectors (AM-001/OV-001/TJ-001/FT-001/EX-001) query extractions via `lookup(mpn)` for verified-IC knowledge |
+| `emc` | **Consumer** — switching-frequency, package-Rθ_JA, and operating-voltage data sharpen EMC heuristics |
+| `spice` | **Consumer** — SPICE model presence + IBIS data feed simulation-readiness checks |
+| `thermal` | **Consumer** — package Rθ_JA + junction temperature limits drive Tj estimates (TS-001..TJ-001) |
+| `bom` | **Indirect** — coverage of structured extractions affects BOM verification confidence |
+
+**Handoff guidance:** This skill is consumer infrastructure. The typical flow is `distributor skill downloads PDF → datasheets skill extracts → analyzer skill queries`. Use this skill directly when (a) the user asks to extract or verify a specific MPN, (b) an analyzer reports `trust_level: low` and the gap is per-MPN extraction quality, or (c) a new MPN was added to the BOM and downstream detectors should pick up its verified specs. Don't run this skill in isolation if the user just wants a design review — call it from the kicad workflow at the "Sync datasheets" step instead.
+
 ## Purpose
 
 Extract structured, machine-readable specifications from component datasheet PDFs and make them available to analyzer skills. Works on whatever PDFs are downloaded under `<project>/datasheets/` (downloads are owned by distributor skills like `digikey`, `mouser`, `lcsc`, `element14`).
@@ -72,6 +85,44 @@ This skill owns:
 3. On cache miss / stale / low score: Claude reads selected PDF pages and extracts structured data.
 4. Extraction is scored; if score ≥ 6.0, cached.
 5. Consumers query via `datasheet_features.py`.
+
+## Consuming extractions (v1.4 typed API)
+
+The recommended consumer surface is the typed `lookup(mpn, cache_dir=...)` facade plus the trust-gating helpers from `datasheet_types`. Import like:
+
+```python
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "datasheets"))
+from datasheet_types import lookup, has_data, best, trusted
+
+# Returns Optional[DatasheetFacts]. None on cache miss / stale PDF / low quality.
+facts = lookup("TPS61023DRLR", cache_dir=pathlib.Path("datasheets/extracted"))
+if facts is None:
+    return  # heuristic-only path; no datasheet evidence available
+
+# Field-level trust gating — every SpecValue list runs through has_data() / best() / trusted().
+pu_range = facts.base.recommended_pullup_range  # Optional[list[SpecValue]]
+if has_data(pu_range):
+    # Most-trusted single value (first SpecValue meeting threshold, preserves extractor order).
+    rec = best(pu_range, min_confidence="medium")  # Optional[SpecValue]
+    if rec is not None and rec.min is not None:
+        ...  # use rec.min, rec.max, rec.typ, rec.unit, rec.evidence.{page,section,confidence}
+
+# All SpecValues at threshold (for multi-value fields like absolute_max).
+hi_conf = trusted(facts.base.absolute_max.get("VDD", []), min_confidence="high")
+```
+
+**Defensive patterns** (mirrors `kicad/SKILL.md` § "Probing Analyzer JSON"):
+
+- `lookup()` returns `None` on cache miss, stale PDF (PDF newer than extraction), or quality score below the configured floor. Always guard with `if facts is None: return`.
+- Category extensions are optional on `DatasheetFacts`. `facts.regulator` is `None` when the part isn't in the `regulator` category — check before dereferencing.
+- SpecValue lists can be `None` (field not extracted), `[]` (extracted but empty), or `list[SpecValue]`. `has_data()` collapses the first two to `False`; pair with `best()` / `trusted()` for confidence gating.
+- `SpecValue.min` / `.max` / `.typ` are each `Optional[float]`. A SpecValue carrying only `typ` (no range) makes `>` / `<` comparisons against `.min` / `.max` raise `TypeError` — guard with explicit `is not None` chains on every numeric access.
+- `confidence` is one of `"low"` / `"medium"` / `"high"`. Calling `best()` / `trusted()` with any other string raises `ValueError`.
+
+## v1.3 compat shim
+
+Legacy detectors still call `get_regulator_features(mpn)` / `get_mcu_features(mpn)` / `get_pin_function(mpn, pin)` from `scripts/datasheet_features.py`. These dual-read v1.4 caches and translate to the v1.3 dict shape. Sunset planned for v1.6 — new code should use `lookup()` directly.
 
 ## When to trigger this skill
 
