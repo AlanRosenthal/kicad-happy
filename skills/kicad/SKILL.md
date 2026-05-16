@@ -285,7 +285,7 @@ All analyzers produce a uniform output envelope:
 ```json
 {
     "analyzer_type": "schematic|pcb|emc|cross_analysis|thermal|gerber|lifecycle|spice",
-    "schema_version": "1.3.0",
+    "schema_version": "1.4.0",
     "summary": {
         "total_findings": 42,
         "by_severity": {"error": 3, "warning": 15, "info": 24}
@@ -642,7 +642,7 @@ python3 <skill-path>/scripts/lifecycle_audit.py analysis.json --output lifecycle
 
 Reads the analyzer JSON BOM section, extracts unique MPNs, queries distributors (LCSC no-auth, DigiKey, element14, Mouser) for lifecycle status and operating temperature. Temperature presets: `commercial` (0/70°C), `industrial` (-40/85°C), `extended` (-40/105°C), `automotive` (-40/125°C), `military` (-55/125°C). Also checks datasheet extraction cache for temperature data before making API calls.
 
-The lifecycle audit produces rich format findings: LC-001 (obsolete/discontinued), LC-002 (last time buy), LC-003 (NRND), LC-004 (unknown status), LC-005 (single source), LC-006 (long lead time), LT-001 (temperature violation).
+The lifecycle audit produces rich format findings: LC-001 (obsolete/discontinued), LC-002 (last time buy), LC-003 (NRND), LC-004 (unknown status), LC-005 (single source), LC-006 (long lead time), LT-001 (temperature violation). When `--lifecycle` is NOT passed (the default), `analyze_schematic.py` emits an `LC-007` info finding noting that the audit was skipped — keeps the gap explicit in the report's findings list instead of being a silent omission.
 
 **Requires network access** — unlike the core analyzers, this script calls distributor APIs. Same environment variables as the distributor skills (DIGIKEY_CLIENT_ID/SECRET, MOUSER_SEARCH_API_KEY, ELEMENT14_API_KEY). LCSC requires no credentials.
 
