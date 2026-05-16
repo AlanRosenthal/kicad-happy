@@ -178,6 +178,31 @@ Note: Windows symlinks may require Developer Mode or elevated privileges.
 
 The analysis scripts are **pure Python 3.10+** with zero required dependencies. No pip install, no Docker, no KiCad installation needed.
 
+### Release candidates
+
+The stable install commands above always resolve to the latest stable release on `main` (currently v1.3.1). To opt into a release candidate for testing, append `#<tag>` to the marketplace ref:
+
+**Claude Code:**
+
+```
+/plugin marketplace add aklofas/kicad-happy#v1.4.0-rc.1
+/plugin install kicad-happy@kicad-happy
+```
+
+This pins to the rc.1 tag. Stable users on the un-suffixed marketplace are unaffected. To switch back to stable, remove the marketplace and re-add it without the `#` suffix.
+
+**Codex / Gemini CLI:** clone the repo and check out the `v1.4.0-rc.1` tag before running the symlink install above:
+
+```bash
+git clone https://github.com/aklofas/kicad-happy.git
+cd kicad-happy
+git checkout v1.4.0-rc.1
+# then run the symlink install for your agent
+```
+
+> [!IMPORTANT]
+> Release candidates are pre-release builds intended for evaluation and feedback. They have passed the corpus regression gate and contract test suite but haven't completed extended manual validation. File issues on GitHub if you hit problems.
+
 ## ⚙️ GitHub Action
 
 Also available as a **GitHub Action** for automated PR reviews. Every push and PR that touches KiCad files gets a commit status check and a structured review comment — power tree, SPICE results, EMC risk, thermal analysis, and more. Optionally chain with Claude for AI-powered natural-language reviews.
@@ -452,121 +477,29 @@ Or set up the [GitHub Action](github-action.md) and get automated analysis on ev
 | KiCad 6  | Full                          | Full | Full   |
 | KiCad 5  | Full (legacy `.sch` + `.lib`) | Full | Full   |
 
-## 🎯 v1.4 — Datasheet Extraction v2 (in development)
+## 🎯 v1.4 — Datasheet Extraction (release candidate)
 
-v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** detectors consume from. Schema-driven structured extraction replaces ad-hoc PDF scraping; every value carries page-anchored evidence and a confidence label; per-detector trust gating lets analyzers downgrade or suppress findings based on source quality.
+> Currently shipping as `v1.4.0-rc.1` (2026-05-15). Final `v1.4.0` follows extended manual validation. Stable users on the un-suffixed marketplace stay on v1.3.1 — see [Release candidates](#release-candidates) to opt in.
 
-**Phase 3a (thin slice — first end-to-end extraction):** scout subagent + base/pinout/regulator extractors + Python orchestration (`plan_extraction.py`, `merge_results.py`) + a swappable file-based dispatcher contract. First production extraction: LM2596-ADJ, scoring 98/100 with 10/10 critical values converging against an independent harness-authored sanity vector. Validated by a 4-check acceptance gate (schema validity, self-consistency via `datasheet_verify.py`, quality score ≥ 60, sanity-vector tolerance diff).
+v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** detectors consume from. Schema-driven structured extraction replaces ad-hoc PDF scraping; every value carries page-anchored evidence and a confidence label; per-detector trust gating lets analyzers downgrade or suppress findings based on source quality. A separate LLM review layer sits on top of analyzer findings — optional, additive, and provably non-destructive (strip the overlay and the byte-identical baseline returns).
 
-**Highlights so far:**
+~50 commits. 11 detectors gain datasheet authority (5 upgraded + 6 new). 6 production datasheet extractions across all 6 part categories. Full Layer 1 regression gate clean corpus-wide (5,857 repos: 0 disappeared / 0 downgrades / 0 fail). 462 contract tests green.
+
+**Highlights:**
 
 | Category | Capabilities |
 | --- | --- |
-| **Schema-driven extraction** | 7 JSON Schema Draft 2020-12 schemas (`base`, `pinout`, `spec_value`, `regulator`, `extraction`, `manifest`, `scout`, `plan`). Every numeric value is a `SpecValue` with min/typ/max/unit/condition/notes/evidence; every value carries `evidence: {page, section, confidence, method}`. Canonical SI units everywhere (capacitance in F, not µF; switching frequency in Hz, not kHz). |
-| **Typed Python access layer** | `from datasheet_types import DatasheetFacts, SpecValue, Pin, lookup, best, trusted, has_data` — fully-typed dataclasses with codec round-trip, `lookup(mpn, cache_dir)` facade with staleness detection, per-detector trust-gating helpers (tri-state: missing vs present-below-gate vs trusted). |
-| **v1.3 compat layer** | Dual-cache-read wrappers preserve the v1.3 detector API surface — analyzers gradually migrate to v1.4 typed access without flag-day cutover. |
-| **Pipeline architecture** | Option D file-based dispatcher contract: `plan_extraction.py` (stdlib) → orchestration plan JSON → swappable dispatcher (Claude Code recipe in v1.4; Codex/Gemini/SDK gated for v1.5) → per-task wrapped result files → `merge_results.py` (stdlib) validates + merges. Cross-agent compatibility via per-agent recipe docs, no Python branching. |
-| **Quality + correctness signals** | Three-dimension v1.4 quality rubric (pinout completeness, base completeness, category-extension completeness) plus reserved v1.5 dimensions. `datasheet_verify_v14_extraction` cross-checks: power_domain references resolve, recommended ≤ absolute, regulator pin references exist, partial-merge sentinels surface as errors. Sanity-vector diff tooling for harness-authored independent cross-checks. |
-| **Two independent LLM readings converge** | Phase 3a correctness signal: harness authors 12 critical-value sanity vectors blind (before any pipeline extraction lands). The 4-check acceptance gate diffs pipeline output against the sanity vector. Convergence = real cross-check, not self-validation. LM2596-ADJ thin slice: 10/10 fields within tolerance. |
+| **Schema-driven extraction** | JSON Schema Draft 2020-12 with a `SpecValue` primitive (min/typ/max/unit/condition/evidence). Canonical SI units everywhere. Six part categories: regulator, diode, transistor, opamp, mcu (catalog tier), crystal. |
+| **5 upgraded detectors** | Pull-up validation, LED resistor, crystal load cap, feedback stability, voltage mismatch — now consume verified datasheet facts when present, with heuristic fallback when not. |
+| **6 new detectors** | Absolute-max violation, operating-range, junction temp vs TJmax, 5V-tolerance, peripheral function mismatch, missing required regulator passives. All datasheet-backed; soft-skip on cache miss. |
+| **LLM review layer** | Optional overlay on top of analyzer findings. Reviewer subagent confirms / suppresses / escalates with structured annotations; merge pipeline writes `analysis/merged/` while baseline `analysis/<analyzer>.json` stays byte-identical. Active but uncalibrated — precision/recall calibration in v1.5. |
+| **Trust + provenance** | Every analyzer emits structured `inputs` provenance (SHA-256 source hashes, run_id, upstream artifact chain). Every envelope declares `compat` (minimum consumer version, deprecated/experimental fields). Layer 1 findings deterministic and byte-stable across runs. |
 
-**Phase 3b (breadth across 5 remaining categories) — CLOSED:** ships `diode`, `transistor`, `opamp`, `mcu` (catalog tier), and `crystal` schemas at v1.0, each authored from field-union datasheet review of two MVP MPNs per category (one extracted end-to-end). 5 new end-to-end extractions all gated to 4/4 PASS by the harness: MBRS540T3G (Schottky power diode, score 82), IRLML6344 (N-MOSFET, 79), LM358 (BJT op-amp, 80), STM32F103C8T6 (Cortex-M3 MCU, 86), ABM8G-106-12.000MHZ-T (12 MHz AT-cut crystal, 76). Combined with Phase 3a's LM2596-ADJ (98), v1.4 ships **6 production extractions across all 6 v1.4 categories**.
+See the full [CHANGELOG](CHANGELOG.md) for details.
 
-New conventions established: `package.body_mm` is a NESTED object `{length, width, height}` (no `_mm` suffix on inner fields; aligns with the pre-existing `base.schema.json` shape). `thermal_resistance` is a closed object with three nullable SpecValue-list sub-fields (`rtheta_ja`/`rtheta_jc`/`rtheta_jl`). `_PIN_FIELDS_BY_CATEGORY` registry replaces the hardcoded regulator-only pin-resolution loop in `verify_v14_extraction` — each category registers its own pin-reference fields. `spec_value.schema.json`'s unit enum extended additively four times during 3b (transistor: `null` for dimensionless `hfe`, `"C"` for gate charge; opamp: `"V/s"` for slew rate, `"dB"` for CMRR/PSRR). Two infrastructure fixes shipped along the way: `base.md` prompt method enum corrected to canonical `table/prose/curve/calculated/derived` (previously had `figure` incorrectly), and `datasheet_verify.py` flag-mode MPN sanitizer extended to preserve dots in MPN filenames (caught by ABM8G's `12.000MHZ` segment).
+## 🎯 v1.3.1 — Bug fixes + Connectivity
 
-**v1.4 deferrals to v1.5:** opamp `noise_voltage_density`/`noise_current_density`/`phase_margin` (V/√Hz and degrees unit sprawl), MCU peripheral inventory Tier 2 (per-instance pin-mux detail), second crystal MPN extraction (only one was on the harness sanity-vector list at brainstorm time), MCU `core_speed_max` and opamp/mcu `TOPR` shape harmonization (harness flagged convention divergence).
-
-### Phase 4a — Foundation Infrastructure (CLOSED 2026-04-28)
-
-Three analyzer-side guarantees that Phase 4's Layer 2 review pipeline depends on:
-
-1. **`run_id` wired through every analyzer.** The first analyzer in a run creates `analysis/capability_mode.json` (canonical run-level record); subsequent analyzers read its `run_id` and embed `capability_mode_ref` in their envelopes. Mirrors the `analysis_cache.py` manifest first-writer-wins pattern.
-2. **Stable `finding_id` derivation in `make_finding()` factory.** Every finding produced via `make_finding()` carries a `finding_id` of the form `{source}:{detection_id}` or `{source}:{rule_id}:{component|net|pin}` or `{source}:{rule_id}:{sha256(summary)[:12]}`. Re-running the same analyzer on the same inputs produces identical `finding_id` sets — overlay match keys for Layer 2 are stable across runs. v1.4 4a ships partial coverage; many raw-dict findings (most schematic detectors + all pcb/thermal/emc) gain `finding_id` when migrated to `make_finding` in v1.5.
-3. **`--only-deterministic` flag on ~13 CLIs.** Read-only semantics: analyzers never write `llm_*` fields; consumers (summarize, diff, kidoc, what_if, spice_tolerance, lifecycle_audit) read `analysis/<analyzer>.json` instead of `analysis/merged/<analyzer>.json` when set. Silent fallback when `analysis/merged/` is absent.
-
-11 commits on `v1.4-dev`; 354 contract tests passing. Hard invariants HI-1, HI-3, HI-5 covered by `tests/contract/test_finding_invariants.py` (HI-5 scoped to `make_finding`-produced findings; full-coverage assertions land in v1.5 with raw-dict migration).
-
-### Phase 4d-skeleton — Layer 2 Architecture (CLOSED 2026-04-28)
-
-`skills/kicad/review/` sub-component lands as the Layer 2 LLM review platform. v1.4 ships the data contract + merge pipeline + empty prompt scaffolds; 4d-active (later) writes the prompts and exercises end-to-end.
-
-**Schemas (3):** `design_context.schema.json` (closed-set enums per spec §15), `review_annotations.schema.json` (HI-8 invariants encoded — reason ≥20 chars, ≤5 reviewer observations, observation confidence capped at "medium"), `severity_tuning.schema.json`.
-
-**Scripts (3):** `merge_annotations.py` validates + applies overlays + enforces HI-2/3/8/9 + writes `analysis/merged/<analyzer>.json`; `build_review_plan.py` emits 2-task review plan with `task_type: "review"`; `validate_review.py` standalone CLI mirroring Phase 3a's `validate_extraction_result.py` pattern.
-
-**Data file:** `severity_tuning.json` (11 rule entries; conservative v1.4 first-ship; `error|warning|info` 3-tier vocabulary matches existing `finding_schema.py:9` canonical).
-
-**Plan schema amendment:** `task_type: "extraction" | "review"` field added to `plan.schema.json` (additive, default "extraction"). Phase 3 extraction plans unaffected.
-
-**Dispatcher recipe addendum:** `dispatch-claude-code.md` Phase 4 addendum routes `task_type: "review"` to review prompts.
-
-### Phase 4b — 5 Upgraded Detectors (CLOSED 2026-04-28)
-
-Five existing detectors now consume v1.4 datasheet facts via the Phase 2 Consumer API `lookup()`, with soft-fallback to existing v1.3 heuristics. Single shared helper module `skills/kicad/scripts/lookup_helpers.py` centralizes `get_facts(mpn, cache_dir)` and re-exports `has_data` / `best` from `datasheet_types` so consuming detectors stay path-clean.
-
-| Rule | Datasheet field | Heuristic fallback | Notes |
-|------|-----------------|--------------------|-------|
-| **PU-001** pull-up value | `base.recommended_pullup_range` | `_PULLUP_MIN/MAX_OHMS` (1k–100k) + I2C/SWD heuristics | Field not yet in base schema; v1.5 |
-| **LR-001** LED resistor | `diode.vf` + `diode.if_max` | `_LED_VF_BY_COLOR` + 20mA default | DiodeBlock dataclass v1.5 |
-| **XT-001** crystal load cap | `crystal.load_capacitance` | 18pF nominal + value-string parse | CrystalBlock dataclass v1.5; new `validate_crystal_load_caps` validator |
-| **FS-001** feedback stability | `regulator.cout_min` + `stability_conditions.esr_range` | `_FB_IMPEDANCE_MIN/MAX` + comp-required keyword list | Regulator IS wired; probe informational today (validation logic v1.5) |
-| **VM-001** voltage mismatch | `base.recommended_operating.{VDD,VCC}` | `_estimate_rail_voltage_for_ic` + EN-pin shortcut via `get_regulator_features` | Probe informational today (validation logic v1.5); existing EN-pin datasheet integration preserved |
-
-Each detector emits `confidence: "datasheet-backed"` + `evidence_source: "datasheet"` when facts populate the lookup field, falling back to existing `confidence: "heuristic"` + `evidence_source: "topology"` (or `"heuristic_rule"`) when absent or below the medium trust gate. Every finding tagged `schema_era: "v1.4"` for harness regression assertions. `design_context` threaded into every emit site for severity tuning by `_apply_severity_tuning()` per the 4d-skeleton matrix.
-
-`AnalysisContext.cache_dir` and `AnalysisContext.design_context` are read via `getattr(ctx, ..., None)` — those fields aren't yet on the dataclass; 4d-active wires them through `analyze_schematic.py`. Soft-fallback semantics mean detectors gracefully heuristic-only today and activate the datasheet branch automatically once 4d-active populates the context.
-
-11 commits on `v1.4-dev`; 423 contract tests green (390 → 423, +33 new).
-
-### Phase 4c — 6 New Detectors via `lookup()` (CLOSED 2026-05-03)
-
-Six new detectors land in `skills/kicad/scripts/lookup_detectors.py`, each consuming v1.4 datasheet facts via the Phase 2 Consumer API. Module-top synonym tables (`VDD_SYNONYMS`, `TJ_SYNONYMS`, `THETA_JA_SYNONYMS`) plus `_resolve_key()` reconcile the open `additionalProperties: SpecValue[]` keys on `base.absolute_max` / `base.recommended_operating` / `base.thermal` with mixed extractor spellings observed in the corpus (`VDD/VCC/VDDA`, `TJ/TJ_max/Tj`).
-
-| Rule | Checks | Required v1.4 fields | Severity |
-|------|--------|----------------------|----------|
-| **AM-001** | Rail voltage exceeds absolute_max for pin's power_domain | `base.absolute_max[VDD_SYNONYMS]` + `pinout.power_domain`; per-pin `Pin.absolute_max` overrides when stricter | error |
-| **OV-001** | Rail voltage outside recommended operating range | `base.recommended_operating[VDD_SYNONYMS]` (min and max bounds) | warning |
-| **TJ-001** | Estimated junction temp exceeds TJmax | `base.thermal[theta_ja]` + `base.absolute_max[TJ_SYNONYMS]`; recomputes TJ = ambient + θJA × P_diss | error |
-| **FT-001** | 5V signal driven into a non-5V-tolerant pin | `pinout.is_5v_tolerant` (None treated as unknown, not as not-tolerant) | error |
-| **PM-001** | Net name suggests peripheral function not in pin's alt_functions | `pinout.alt_functions[].peripheral`/`name`; net-name regex map covers UART/I2C/SPI/USB/CAN/I2S | warning |
-| **EX-001** | Datasheet-required regulator passive missing | `regulator.cin_min` (input cap), `cout_min` (output cap), `inductor_range` (switching topologies) | error |
-
-All findings emit `confidence: "datasheet-backed"` + `evidence_source: "datasheet"` and tag `schema_era: "v1.4"`. Detectors soft-skip when `get_facts()` returns None (cache miss / stale / below trust gate) — no analyzer ever blocks on lookup, per spec §5.1. `design_context` threads through every emit site for Layer 2 severity tuning.
-
-Wiring: AM-001/OV-001/FT-001/PM-001/EX-001 invoked from `analyze_schematic.py` into a new `lookup_findings` results-dict key parallel to `validation_findings`. TJ-001 invoked from `analyze_thermal.py` after the existing `_compute_junction_temps` pass — operates on the assessments list with v1.3-derived `pdiss_w`/`ambient_c` and recomputes TJ via v1.4 θJA. Both call sites read `cache_dir` and `design_context` via `getattr(ctx, ..., None)` matching the Phase 4b convention until 4d-active wires the fields onto `AnalysisContext`.
-
-**Day-1 fire prognosis** (per harness data-presence audit, 2026-05-03; populated fields across the 6-MPN reference corpus): AM-001 fires on 6/6 MPNs (block presence) with rail-mapping on 3/6; TJ-001 fires on 4/6; FT-001/PM-001 fire on STM32-class parts (alt_functions and is_5v_tolerant populated only there today); EX-001 fires on LM2596-ADJ (sole regulator with cin_min/cout_min/inductor_range populated); OV-001 covers 1/6. The remaining MPNs ship probe-only — detectors fire automatically when extractor prompts populate the missing fields in v1.5.
-
-6 commits on `v1.4-dev`; **454 contract tests green** (423 → 454, +31 new across 6 detector test files).
-
-### Phase 4d-active — Layer 2 End-to-End Exercise (CLOSED 2026-05-04)
-
-Production prompts written for `skills/kicad/review/prompts/design_context.md` and `skills/kicad/review/prompts/reviewer.md` (replacing the 4d-skeleton scaffolds). `AnalysisContext.cache_dir` and `AnalysisContext.design_context` fields wired onto the dataclass and populated at the two construction sites in `analyze_schematic.py` — activating the datasheet-backed branch in 4b/4c lookup detectors when `analysis/design_context.json` and `datasheets/extracted/` are both present. Resolution helper `_resolve_lookup_paths()` mirrors `analyze_thermal.py`'s existing `extract_dir` convention.
-
-End-to-end orchestrator at `skills/kicad/review/scripts/run_phase4_exercise.py` exercises the full Layer 1 → Layer 2 pipeline in 5 steps:
-1. Run 5 Layer 1 analyzers (schematic / pcb / thermal / emc / cross_analysis — gerber skipped for v1.4 fixture, no fab outputs)
-2. Assert HI-7: `capability_mode_ref.run_id` consistent across every envelope vs canonical `analysis/capability_mode.json`
-3. Build the 2-task review plan (`design_context` Tier B + `reviewer` Tier A)
-4. Merge `review_annotations.json` into `analysis/merged/<analyzer>.json` overlays; assert HI-3 strip-LLM byte-identical
-5. Dual-mode consumer-contract probe: overlay-only differences (HI-2), finding count parity raw vs merged
-
-**v1.4 fixture exercise verdict:** All 5 steps PASS on `tests/fixtures/phase4-review/` (gitignored — SparkFun GNSSDO board imported from harness corpus, ~444 findings across 5 analyzers). Reviewer subagent produced 10 schema-valid annotations (6 confirmed, 4 suppressed, 0 escalated; 0.9% suppression rate well under HI-8 30% cap). Merge applied 10 / suppressed 4 with 0 invariant_violations and 0 orphans.
-
-8 new contract tests in `tests/contract/test_phase4_exercise.py` skip cleanly when the fixture is absent (CI-safe). Tests cover HI-3, HI-2, HI-8, HI-7, schema_era v1.4 sanity, design_context schema validity, review_annotations schema validity, and `produced_for_run_id` ↔ `capability_mode.run_id` linkage.
-
-5 commits on `v1.4-dev`; **462 contract tests green** (454 → 462, +8 new). **Phase 4 closes end-to-end with this sub-phase.**
-
-### Phase 4 — Phase Total
-
-11 detectors gain datasheet authority (5 upgraded + 6 new). Layer 2 LLM review architecture lands with 9 hard invariants (HI-1..9) asserted by main-repo unit tests + harness B-tests (B1–B9). 36 plan tasks across 5 sub-phases (4a foundation, 4d-skeleton architecture, 4b 5 upgraded, 4c 6 new, 4d-active end-to-end). ~50 commits total (Phase 1 + 2 + 3a + 3b + 4a + 4d-skeleton + 4b + 4c + 4d-active). Layer 2 ships **active but uncalibrated** per spec Q2-B; precision/recall calibration deferred to v1.5.
-
-## v1.3.1 — Bug fixes + Connectivity
-
-- Fix `format-report.py` crash on dict-shaped `power_rails` (issues #16, #20).
-- Add `.kicad_pro` `top_level_sheets` support for Altium flat multi-page imports (#19).
-- PCB connectivity rewrite: track-as-node model, compound pads, `*.Cu` wildcards.
-- Fix pad rotation sign; unify analysis-dir resolution.
-- KH-147: suppress LED-driver false positives when the current resistor's value field has a suffix the parser can't read (e.g. `215k_0402_…`).
-- Bump minimum Python to 3.10; add cross-agent install guidance (Claude Code, Codex, Gemini).
+Patch release: `format-report.py` dict-shaped `power_rails` crash fix (#16, #20), Altium `top_level_sheets` flat multi-page support (#19), PCB connectivity rewrite (track-as-node, compound pads, `*.Cu` wildcards), pad rotation sign fix, LED-driver false-positive suppression on parser-unreadable resistor values (KH-147), Python 3.10 minimum.
 
 ## 🎯 v1.3 — Harmonized Analysis
 

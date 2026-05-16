@@ -72,6 +72,41 @@ them but fall back to web search.
 
 After installation, run `/reload-plugins` if skills don't appear immediately.
 
+#### Pin to a specific version or release candidate
+
+The default marketplace ref is the GitHub repo's default branch (`main`),
+which carries the latest stable release. To pin to a specific tag or branch,
+append `#<ref>` to the marketplace ref:
+
+```
+# Pin to a release candidate
+/plugin marketplace add aklofas/kicad-happy#v1.4.0-rc.1
+/plugin install kicad-happy@kicad-happy
+
+# Track a development branch (will follow further commits)
+/plugin marketplace add aklofas/kicad-happy#v1.4-dev
+/plugin install kicad-happy@kicad-happy
+
+# Pin to a previous stable release
+/plugin marketplace add aklofas/kicad-happy#v1.3.1
+/plugin install kicad-happy@kicad-happy
+```
+
+Stable users on the un-suffixed marketplace (`aklofas/kicad-happy`) are
+unaffected by RC tags — release candidates live on the `v1.4-dev` branch
+and don't reach `main` until v1.4.0 final. Claude Code marketplaces have
+no SemVer-prerelease-skip logic, so the `#<ref>` suffix is the only opt-in
+mechanism for prereleases.
+
+To switch back to stable, remove and re-add the marketplace without the
+suffix:
+
+```
+/plugin marketplace remove aklofas/kicad-happy
+/plugin marketplace add aklofas/kicad-happy
+/plugin install kicad-happy@kicad-happy
+```
+
 ### Install (manual symlinks)
 
 Use this if the marketplace install fails, or to pin to a specific version.

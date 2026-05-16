@@ -6,7 +6,96 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
-## v1.4-dev (in progress)
+## v1.4.0-rc.1 — 2026-05-15
+
+**Theme: Datasheet Extraction v2 + Layer 2 Review** — release candidate;
+final `v1.4.0` follows extended manual validation.
+
+> **Installing the RC:** stable users on `/plugin install kicad-happy@kicad-happy`
+> stay on v1.3.1 — the rc lives on the `v1.4-dev` branch and won't reach `main`
+> until v1.4.0 final. To opt in for testing:
+> ```
+> /plugin marketplace add aklofas/kicad-happy#v1.4.0-rc.1
+> /plugin install kicad-happy@kicad-happy
+> ```
+
+v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge
+layer** detectors consume from. Schema-driven structured extraction
+replaces ad-hoc PDF scraping; every value carries page-anchored evidence
+and a confidence label; per-detector trust gating lets analyzers
+downgrade or suppress findings based on source quality. A separate
+Layer 2 LLM review overlay sits on top of Layer 1 analyzer findings —
+optional, additive, and provably non-destructive (strip the overlay and
+the byte-identical Layer 1 baseline returns).
+
+Validated by **Layer 1 regression gate clean corpus-wide** (5,857 repos
+× 6 analyzers, v1.3.1 vs `--only-deterministic` v1.4: 0 disappeared / 0
+downgrades / 0 fail / 0 new_unknown) and **462/462 contract tests
+green**.
+
+The Track-by-Track sections below cover the foundation (Tracks 1.1–1.5)
+and the consumer API (Tracks 2.1–2.6). The full v1.4 story — including
+Phase 3 (extraction pipeline thin slice + 5 category extensions) and
+Phase 4 (foundation infra, Layer 2 review architecture, 5 upgraded
+detectors, 6 new detectors, end-to-end exercise) — is in the
+[README v1.4 section](README.md#-v14--datasheet-extraction-v2-release-candidate).
+
+### Other changes
+
+- **`group_findings_legacy` → `group_findings_by_detection_type` rename**
+  (was: "compat shim pending v1.4 Priority 0 modernization" in v1.3.0).
+  The helper is in fact a legitimate flat-findings → grouped-dict
+  adapter — not removable debt. Renamed to reflect its real role and
+  kept as first-party API in `finding_schema.py`. Internal consumers
+  (`what_if.py`, `diff_analysis.py`) updated to the new name. Old name
+  remains importable as a one-line alias for external callers.
+- **`voltage_derating` → rich findings (VD-001..004)** — the schematic
+  analyzer's `voltage_derating` results dict (legacy pre-v1.3 shape)
+  migrated to the rich finding envelope with four rule IDs: VD-001
+  (ceramic cap voltage derating), VD-002 (electrolytic cap voltage
+  derating), VD-003 (resistor power derating), VD-004 (IC absolute-max
+  exceeded). Consumers that previously read the dict shape now read
+  `findings[]` filtered by rule_id. `group_findings()` adapter
+  preserves the legacy access pattern.
+- **`capability_mode.json` atomic-write fix (KH-325)** — first-writer
+  race on the canonical `capability_mode.json` record fixed via
+  `os.rename` atomic rename pattern. Eliminates a rare TOCTOU window
+  observed under parallel analyzer execution.
+
+### Known limitations (v1.5 candidates)
+
+- **Layer 2 ships active but uncalibrated** (per spec Q2-B). The
+  reviewer subagent produces schema-valid annotations; precision/recall
+  calibration against a labeled corpus is deferred to v1.5. Layer 1
+  findings remain authoritative; Layer 2 annotations are overlay-only
+  and never modify the baseline.
+- **`finding_id` partial coverage** — Phase 4a's HI-5 stable-finding-id
+  invariant ships for `make_finding`-produced findings only. Many
+  raw-dict findings (most schematic detectors + all pcb/thermal/emc)
+  gain `finding_id` when migrated to `make_finding` in v1.5.
+- **Opamp + MCU datasheet schema deferrals** — opamp
+  `noise_voltage_density` / `noise_current_density` / `phase_margin`
+  (V/√Hz and degrees unit sprawl), MCU peripheral inventory Tier 2
+  (per-instance pin-mux detail), and MCU `core_speed_max` /
+  opamp+mcu `TOPR` shape harmonization are all deferred to v1.5.
+- **Datasheet field population is uneven across the 6 v1.4 reference
+  MPNs.** Per harness data-presence audit (2026-05-03): AM-001 fires
+  on 6/6 (block presence) with rail-mapping on 3/6; TJ-001 4/6;
+  FT-001/PM-001 fire on STM32-class parts only (alt_functions and
+  is_5v_tolerant populated only there); EX-001 fires on LM2596-ADJ
+  only. Remaining MPNs ship probe-only — detectors auto-activate as
+  extractor prompts populate the missing fields.
+- **Hierarchical-project gate parity** — the Layer 1 regression gate
+  intentionally passes `--no-hierarchy` to both v1.3.1 and v1.4 to
+  isolate the datasheet-layer changes from independent hierarchy work.
+  A curated hierarchical-project regression gate is deferred to the
+  next harness cycle.
+- **`_families/` cache subdirectory reserved but unused** — Tier 2
+  family extraction lands in v1.5. The directory layout and
+  `lookup()` ignore-rule are documented + locked by test
+  (`test_lookup_ignores_families_subdirectory_coexisting_with_cache_files`).
+
+---
 
 ### Track 2.6 — Cache Layout Documentation (2026-04-19)
 

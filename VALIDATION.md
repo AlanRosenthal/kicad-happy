@@ -2,7 +2,7 @@
 
 This document describes how kicad-happy is tested and validated. Every change to the analysis engine is verified against a corpus of real-world KiCad projects before release.
 
-*Auto-generated on 2026-04-16 by `generate_validation_md.py`.*
+*Auto-generated on 2026-05-16 by `generate_validation_md.py`.*
 
 ## Why this matters
 
@@ -10,7 +10,7 @@ Hardware design review tools must be trustworthy. A false negative (missed bug) 
 
 ## Test corpus
 
-The [test harness](https://github.com/aklofas/kicad-happy-testharness) contains 5,856 open-source KiCad projects — the kind of designs real engineers actually build.
+The [test harness](https://github.com/aklofas/kicad-happy-testharness) contains 5,857 open-source KiCad projects — the kind of designs real engineers actually build.
 
 **Corpus diversity:**
 
@@ -32,7 +32,7 @@ The [test harness](https://github.com/aklofas/kicad-happy-testharness) contains 
 | KiCad 7 | 9 |
 | KiCad 8 | 1,225 |
 | KiCad 9 | 1,365 |
-| KiCad 10 | 40 |
+| KiCad 10 | 41 |
 
 **Category distribution:**
 
@@ -43,8 +43,8 @@ The [test harness](https://github.com/aklofas/kicad-happy-testharness) contains 
 | Synthesizers / audio | 324 |
 | Motor controllers / robotics | 315 |
 | LED / display | 304 |
+| Arduino recreations | 295 |
 | ESP32 | 294 |
-| Arduino recreations | 294 |
 | Networking / radio / SDR | 254 |
 | Sensor boards / IoT | 250 |
 | Retro computing | 235 |
@@ -65,11 +65,11 @@ Every analysis script runs against every applicable file in the corpus. Nothing 
 
 | Analyzer | Files tested | Success rate |
 |----------|-------------|--------------|
-| Schematic (`analyze_schematic.py`) | 36,577 | 100% |
-| PCB (`analyze_pcb.py`) | 18,745 | 100% |
-| Gerber (`analyze_gerbers.py`) | 5,506 | 100% |
-| EMC (`analyze_emc.py`) | 36,658 | 100% |
-| SPICE (`simulate_subcircuits.py`) | 36,552 | 100% |
+| Schematic (`analyze_schematic.py`) | 36,591 | 100% |
+| PCB (`analyze_pcb.py`) | 18,752 | 100% |
+| Gerber (`analyze_gerbers.py`) | 5,513 | 100% |
+| EMC (`analyze_emc.py`) | 42,513 | 100% |
+| SPICE (`simulate_subcircuits.py`) | 36,565 | 100% |
 
 A single unhandled exception across any analyzer on any file in the corpus is treated as a release blocker.
 
@@ -77,11 +77,34 @@ A single unhandled exception across any analyzer on any file in the corpus is tr
 
 Hard assertions on known-good output values. If a previously correct result changes, the assertion fails and the change must be investigated.
 
+*Measured via `regression/run_checks.py --json`: 2,362,793 passed / 90 failed / 2 errors out of 2,362,885 (100.0%).*
+
 | Category | Assertion count | Pass rate |
 |----------|----------------|-----------|
-| **Total** | **2,239,678** | **100%** |
+| **Total** | **2,364,698** | **100.0%** |
 
 Assertions are seeded from validated output and checked on every run. When analyzer logic changes intentionally (new fields, corrected calculations), affected assertions are re-seeded after manual verification.
+
+### v1.4 Layer 1 regression gate
+
+v1.4 introduces the `--only-deterministic` flag to scope analyzer output to evidence-backed findings. The Layer 1 regression gate runs both v1.3.1 (plain) and v1.4 (`--only-deterministic`) over the harness corpus and diffs the resulting envelopes, asserting v1.4 does not silently drop or downgrade any v1.3.1 finding.
+
+Latest run: section `rc1_fix_f561e47_full`, 169,951 analyzer-runs. Verdict: **CLEAN**.
+
+| Outcome | Count |
+|---------|------:|
+| PASS | 149,561 |
+| FAIL | 0 |
+| Disappeared | 0 |
+| Downgrades | 0 |
+| Upgrades | 0 |
+| NewKnown | 3,589 |
+| NewUpgraded | 0 |
+| NewUnknown | 0 |
+| WARN | 5 |
+| SKIP | 20,385 |
+
+*Gate is CLEAN when `Disappeared == 0`, `Downgrades == 0`, and `FAIL == 0`. `NewKnown` and `NewUpgraded` are tolerated (intentional new v1.4 findings); `NewUnknown` is reported but not gating.*
 
 ## Signal detector coverage
 
@@ -89,36 +112,36 @@ Assertions are seeded from validated output and checked on every run. When analy
 
 | Detector | Repos with hits |
 |----------|----------------|
-| audit_rail_sources | 5,214 |
-| audit_esd_protection | 5,074 |
-| detect_design_observations | 4,951 |
-| audit_datasheet_coverage | 4,023 |
-| audit_sourcing_gate | 3,962 |
-| detect_decoupling | 3,848 |
-| validate_pullups | 3,293 |
-| audit_connector_ground_distribution | 3,147 |
-| audit_led_circuits | 3,019 |
-| detect_power_regulators | 2,979 |
+| audit_rail_sources | 5,215 |
+| audit_esd_protection | 5,075 |
+| detect_design_observations | 4,952 |
+| audit_datasheet_coverage | 4,024 |
+| audit_sourcing_gate | 3,963 |
+| detect_decoupling | 3,849 |
+| validate_pullups | 3,294 |
+| audit_connector_ground_distribution | 3,148 |
+| audit_led_circuits | 3,020 |
+| detect_power_regulators | 2,980 |
 | analyze_connectivity | 2,825 |
-| detect_rc_filters | 2,579 |
-| detect_voltage_dividers | 2,281 |
-| detect_transistor_circuits | 2,208 |
-| detect_crystal_circuits | 1,852 |
-| detect_protection_devices | 1,674 |
+| detect_rc_filters | 2,580 |
+| detect_voltage_dividers | 2,282 |
+| detect_transistor_circuits | 2,209 |
+| detect_crystal_circuits | 1,853 |
+| detect_protection_devices | 1,675 |
 | audit_power_pin_dc_paths | 1,605 |
 | detect_solder_jumpers | 1,399 |
-| suggest_certifications | 1,187 |
+| suggest_certifications | 1,188 |
 | validate_led_resistors | 1,149 |
 | detect_label_aliases | 1,119 |
-| validate_power_sequencing | 1,049 |
-| detect_debug_interfaces | 1,024 |
-| detect_wireless_modules | 972 |
+| validate_power_sequencing | 1,050 |
+| detect_debug_interfaces | 1,025 |
+| detect_wireless_modules | 973 |
 | detect_lc_filters | 833 |
 | validate_usb_bus | 809 |
-| validate_voltage_levels | 802 |
+| validate_voltage_levels | 803 |
 | detect_opamp_circuits | 741 |
 | validate_i2c_bus | 475 |
-| detect_memory_interfaces | 435 |
+| detect_memory_interfaces | 436 |
 | detect_led_drivers | 428 |
 | detect_pwm_led_dimming | 423 |
 | detect_key_matrices | 423 |
@@ -129,14 +152,14 @@ Assertions are seeded from validated output and checked on every run. When analy
 | detect_adc_circuits | 281 |
 | detect_motor_drivers | 274 |
 | detect_battery_chargers | 273 |
-| detect_rf_matching | 244 |
+| detect_rf_matching | 245 |
 | detect_reset_supervisors | 237 |
 | detect_audio_circuits | 226 |
 | detect_clock_distribution | 211 |
 | detect_isolation_barriers | 189 |
 | detect_power_path | 187 |
 | detect_current_sense | 176 |
-| detect_rf_chains | 154 |
+| detect_rf_chains | 155 |
 | validate_feedback_stability | 153 |
 | detect_bridge_circuits | 137 |
 | validate_can_bus | 136 |
@@ -182,25 +205,25 @@ The harness requires Python 3.8+ and a checkout of the corpus repos. ngspice is 
 
 All analyzer bugs found during validation are tracked with sequential IDs:
 
-- `KH-001` through `KH-322`: analyzer issues (275 filed, 275 closed, 0 open)
-- `TH-001` through `TH-008`: harness infrastructure issues
+- `KH-001` through `KH-326`: analyzer issues (278 filed, 278 closed, 0 open)
+- `TH-001` through `TH-040`: harness infrastructure issues (35 filed, 31 closed, 4 open)
 
-Each closed issue has a corresponding bugfix regression guard assertion that prevents the bug from returning.
+Each closed analyzer issue has a corresponding bugfix regression guard assertion that prevents the bug from returning.
 
 ## Numbers at a glance
 
 | Metric | Value |
 |--------|-------|
-| Repos in corpus | 5,856 |
-| Schematic files | 36,577 |
-| PCB files | 18,745 |
-| Gerber directories | 5,506 |
-| EMC analyses | 36,658 |
-| SPICE simulations | 36,552 |
-| Components parsed | 1,305,560 |
-| Nets traced | 2,089,813 |
-| Regression assertions | 2,239,678 at 100% |
-| Bugfix guards | 76 (100% — no regressions) |
-| Closed issues | 275 analyzer + 8 harness |
-| Open issues | 0 |
+| Repos in corpus | 5,857 |
+| Schematic files | 36,591 |
+| PCB files | 18,752 |
+| Gerber directories | 5,513 |
+| EMC analyses | 42,513 |
+| SPICE simulations | 36,565 |
+| Components parsed | 1,305,789 |
+| Nets traced | 2,090,189 |
+| Regression assertions | 2,364,698 at 100% |
+| Bugfix guards | 103 (100% — no regressions) |
+| Closed issues | 278 analyzer + 31 harness |
+| Open issues | 0 analyzer + 4 harness |
 | Schematic detectors | 65 |

@@ -28,9 +28,10 @@ JLCPCB is a PCB fabrication and assembly service based in Shenzhen, China. It is
 
 | Category | Description | Assembly Fee |
 |----------|-------------|--------------|
-| **Basic** | ~698 common parts (resistors, caps, diodes, etc.) pre-loaded on pick-and-place machines | No extra fee |
-| **Preferred Extended** | Frequently used extended parts | No feeder loading fee (Economic assembly) |
+| **Basic** | Common parts (resistors, caps, diodes, common ICs) pre-loaded on pick-and-place machines | No extra fee |
 | **Extended** | 300k+ less common parts loaded on demand | $3 per unique extended part |
+
+> JLCPCB occasionally promotes a subset of frequently-used extended parts with a discounted or waived feeder fee (the program's name and terms shift over time). Check the current JLCPCB parts library page for any specific extended part before assuming the standard $3 fee applies.
 
 ### LCSC Part Numbers
 

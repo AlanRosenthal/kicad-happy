@@ -296,19 +296,20 @@ For detailed information about the behavioral models used, their accuracy envelo
 | `scripts/spice_model_generator.py` | Parameterized behavioral .subckt generation from specs dicts |
 | `scripts/spice_model_cache.py` | Project-local model cache in `spice/models/` next to the schematic |
 | `scripts/spice_spec_fetcher.py` | Queries distributor APIs (LCSC, DigiKey, element14, Mouser), structured datasheet extractions, and PDF regex for parametric specs |
-| `scripts/extract_parasitics.py` | Compute trace R, via L, coupling C from PCB analysis JSON (Phase 3) |
+| `scripts/extract_parasitics.py` | Compute trace R, via L, coupling C from PCB analysis JSON |
 
-## Per-Part Behavioral Models (Phase 2)
+## Per-Part Behavioral Models
 
 When the analyzer detects an opamp with a recognized MPN (e.g., LM358, TL072, MCP6002), the skill uses a **per-part behavioral model** instead of the generic ideal opamp. The model captures the actual GBW, slew rate, input offset, and output swing from the part's datasheet.
 
 Model resolution cascade:
 1. **Project cache** (`<project>/spice/models/`) — previously resolved models
-2. **Distributor API specs** — queries LCSC (no auth), DigiKey, element14, Mouser for real parametric data
-3. **Structured datasheet extraction** — reads pre-extracted specs from `<project>/datasheets/extracted/` (cached JSON with SPICE-relevant parameters, scored for quality)
-4. **Datasheet PDF regex extraction** — reads from `<project>/datasheets/`, extracts via text pattern matching (last resort)
-5. **Built-in lookup table** — ~100 common parts as offline fallback
-6. **Ideal model fallback** — if the MPN isn't recognized by any source
+2. **v1.4 typed datasheet facts** — via `lookup(mpn, cache_dir=<project>/datasheets/extracted)` from the `datasheets` skill. Returns `DatasheetFacts` with `opamp.gbw`, `opamp.slew_rate`, etc. as `SpecValue` instances with trust gating. Recommended source when present.
+3. **Distributor API specs** — queries LCSC (no auth), DigiKey, element14, Mouser for real parametric data
+4. **v1.3 structured datasheet extraction** — reads pre-extracted specs from `<project>/datasheets/extracted/` (legacy dict-shaped JSON, scored for quality). Dual-read compat path; still consulted when v1.4 cache misses.
+5. **Datasheet PDF regex extraction** — reads from `<project>/datasheets/`, extracts via text pattern matching (last resort)
+6. **Built-in lookup table** — ~100 common parts as offline fallback
+7. **Ideal model fallback** — if the MPN isn't recognized by any source
 
 The `model_note` field in the report indicates which model was used: `"LM358 behavioral (lookup:LM358, GBW=1.0MHz)"` vs `"ideal opamp (Aol=1e6, GBW~10MHz)"`.
 

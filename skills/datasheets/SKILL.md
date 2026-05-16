@@ -12,11 +12,12 @@ Extract structured, machine-readable specifications from component datasheet PDF
 ## Scope
 
 This skill owns:
-- **Extraction schema** — the canonical JSON structure for per-MPN specs. Versioned via `EXTRACTION_VERSION` in `scripts/datasheet_extract_cache.py`.
+- **Extraction schemas** — canonical JSON structures for per-MPN specs. v1.4 ships 6 JSON Schema Draft 2020-12 schemas under `schemas/` (`base`, `pinout`, `spec_value`, `regulator`, `extraction`, `manifest`) plus 5 v1.4 category extensions (diode, transistor, opamp, mcu, crystal). v1.3 cache format (`EXTRACTION_VERSION` in `scripts/datasheet_extract_cache.py`) is still read for compat.
+- **Typed access layer (v1.4)** — `datasheet_types/` package exposes `DatasheetFacts`, `SpecValue`, `Pin`, `Pinout`, `lookup()`, `best()`, `trusted()`, `has_data()`. Recommended for all new consumers.
 - **PDF page selection** — heuristics to pick pages most likely to contain pinouts, e-chars, applications, SPICE models.
-- **Quality scoring** — weighted rubric (pin coverage, voltage ratings, application info, electrical chars, SPICE specs).
-- **Consumer API** — helpers in `scripts/datasheet_features.py` for other skills to query specific fields (e.g., `get_regulator_features(mpn)`, `get_mcu_features(mpn)`).
-- **Verification** — consistency checks between extracted data and schematic/PCB usage.
+- **Quality scoring** — v1.4 uses a three-dimension rubric (pinout completeness, base completeness, category-extension completeness, 0–100 scale). v1.3 5-dimension weighted rubric still applies to legacy caches.
+- **Consumer APIs** — `scripts/datasheet_lookup.py` for v1.4 typed access; `scripts/datasheet_features.py` for the v1.3 dict-shaped helpers (`get_regulator_features`, `get_mcu_features`, `get_pin_function`) — the v1.3 helpers dual-read v1.4 caches and translate to v1.3 dict shape for legacy detector code. Sunset planned for v1.6.
+- **Verification** — `datasheet_verify.py` (v1.3, schema-vs-usage cross-check) plus `datasheet_verify_v14_extraction` (v1.4, power_domain references resolve, recommended ≤ absolute, regulator pin references exist).
 
 ## Non-goals
 
@@ -41,19 +42,33 @@ This skill owns:
 - `references/field-extraction-guide.md` — how to find each field in datasheets from common vendors (TI, ST, NXP, Espressif, Microchip)
 - `references/quality-scoring.md` — rubric details, score thresholds
 - `references/consumer-api.md` — how kicad/emc/spice/thermal consume extractions
+- `references/cache-layout.md` — v1.4 cache directory convention (per-MPN files, `_families/` reservation, staleness rules)
 
 ## Entry-point scripts
 
-- `scripts/datasheet_extract_cache.py` — cache manager, resolver, indexer
-- `scripts/datasheet_page_selector.py` — page selection heuristics
-- `scripts/datasheet_score.py` — extraction quality scoring
-- `scripts/datasheet_verify.py` — cross-check extraction vs schematic usage
-- `scripts/datasheet_features.py` — consumer helper API (new in v1.3)
+- `scripts/datasheet_extract_cache.py` — v1.3 cache manager, resolver, indexer
+- `scripts/datasheet_page_selector.py` — page selection heuristics (used by both v1.3 and v1.4 pipelines)
+- `scripts/datasheet_score.py` — v1.3 extraction quality scoring
+- `scripts/datasheet_verify.py` — cross-check extraction vs schematic usage (v1.3 + v1.4 `verify_v14_extraction` mode)
+- `scripts/datasheet_lookup.py` — **v1.4** typed `lookup(mpn) → DatasheetFacts` facade with staleness detection
+- `scripts/datasheet_features.py` — v1.3 consumer helper API (dual-reads v1.4 caches via `_derive_*_v14` translators)
+- `scripts/plan_extraction.py` — **v1.4** orchestration plan generator (Phase 3 extraction pipeline)
+- `scripts/merge_results.py` — **v1.4** per-task result validator + merger
+- `datasheet_types/` — **v1.4** typed access layer package (`DatasheetFacts`, `SpecValue`, `Pin`, `Pinout`, `lookup`, `best`, `trusted`, `has_data`)
 
 ## Extraction workflow
 
+**v1.4 pipeline (current, used for all new extractions):**
+1. `plan_extraction.py` builds an orchestration plan JSON.
+2. Scout subagent inspects the PDF (TOC, headings) and emits per-MPN scout audit file.
+3. Category extractor prompts (base, pinout, regulator, …) run per Phase 2 dispatcher recipe.
+4. `merge_results.py` validates per-task result files against schemas and merges into `<project>/datasheets/extracted/<MPN>.json`.
+5. Three-dimension quality score lives at `facts.extraction.quality_score`.
+6. Consumers query via `lookup(mpn, cache_dir)` or via the v1.3 compat helpers in `datasheet_features.py`.
+
+**v1.3 legacy pipeline (read-only in v1.4):**
 1. User runs an analyzer or requests extraction.
-2. This skill checks the cache (`<project>/datasheets/extracted/<MPN>.json`).
+2. Skill checks the cache (`<project>/datasheets/extracted/<MPN>.json`).
 3. On cache miss / stale / low score: Claude reads selected PDF pages and extracts structured data.
 4. Extraction is scored; if score ≥ 6.0, cached.
 5. Consumers query via `datasheet_features.py`.

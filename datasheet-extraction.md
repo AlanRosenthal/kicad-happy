@@ -4,27 +4,43 @@ Deep-dive into how kicad-happy turns component datasheet PDFs into structured JS
 
 The **datasheets** skill is the structured-spec layer that sits between the distributor skills (which download PDFs) and the analyzer skills (which consume verified per-part knowledge). If you've ever wanted an analyzer that knows the EN-pin threshold on a specific LDO, the USB peripheral speed on a specific MCU, or the thermal resistance of a specific QFN — this is how it gets there.
 
+> **Two APIs coexist as of v1.4.**
+> - **v1.4 typed API** (`from datasheet_types import DatasheetFacts, lookup, best, trusted`) — recommended for all new code. Schema-driven extractions, page-anchored evidence, per-value confidence labels, trust gating.
+> - **v1.3 dict API** (`from datasheet_features import get_regulator_features`) — legacy compat layer, still supported. Dual-reads v1.4 caches and translates them back to the v1.3 dict shape so existing detector code keeps working. Sunset planned for v1.6 once the mcu schema lands in v1.5.
+
+Each extraction is cached per-project, not globally — two projects with the same MPN can hold different extractions if they pin different datasheet revisions. There is no shared cross-project library.
+
 ## How It Works
 
 ```
 Distributor skills download PDFs:
   digikey/mouser/lcsc/element14  → <project>/datasheets/<MPN>.pdf
 
-Datasheets skill extracts structure:
+v1.4 typed pipeline (current):
   <MPN>.pdf  → page selector  → target pages
-             → extractor      → <project>/datasheets/extracted/<MPN>.json
-             → scorer         → quality score (0.0-10.0)
-             → cache manager  → manifest.json entry
-             → verifier       → consistency check vs schematic usage
+             → plan_extraction.py + scout subagent
+             → category extractor prompts (base, pinout, regulator, diode,
+                                            transistor, opamp, mcu, crystal)
+             → merge_results.py validates + merges
+             → <project>/datasheets/extracted/<MPN>.json (typed schema v1.0+)
+             → datasheet_verify_v14_extraction cross-checks invariants
+             → quality scorer (3-dim rubric: pinout / base / category)
 
-Analyzer skills consume:
+v1.3 legacy pipeline (read-only in v1.4):
+  Existing v1.3 caches keep working via the compat wrapper. New
+  extractions never write the v1.3 format.
+
+Analyzer skills consume (v1.4 typed):
   kicad, emc, spice, thermal, kidoc
-    → get_regulator_features(mpn)  → None (miss/stale/low-score) or dict
-    → get_mcu_features(mpn)        → None or dict
-    → get_pin_function(mpn, pin)   → None or string
-```
+    → lookup(mpn, cache_dir=Path("datasheets/extracted"))  → DatasheetFacts | None
+    → best(facts.regulator.vin_range, min_confidence="medium")  → SpecValue | None
+    → trusted(facts.base.absolute_max["VDD"], min_confidence="high")  → list[SpecValue]
 
-Each extraction is cached per-project, not globally — two projects with the same MPN can hold different extractions if they pin different datasheet revisions. There is no shared cross-project library.
+Analyzer skills consume (v1.3 compat):
+    → get_regulator_features(mpn)  → dict | None  (dual-reads v1.4, falls back to v1.3 cache)
+    → get_mcu_features(mpn)        → dict | None  (v1.3 cache only — v1.4 MVP has no mcu schema)
+    → get_pin_function(mpn, pin)   → str | None
+```
 
 ## When to Extract
 
@@ -37,9 +53,79 @@ Run the extraction pipeline **before** your first design review on a project, an
 
 For small designs (< 8 ICs), extract all ICs. For large designs, prioritize ICs that appear in power regulators, opamp circuits, MCU pin analysis, and high-speed interfaces — these are where datasheet-backed confidence has the highest value.
 
-## Example Extraction Output
+## v1.4 typed API (recommended)
 
-A per-MPN JSON file looks like this (simplified):
+The v1.4 access layer lives in `skills/datasheets/datasheet_types/`. All new detectors and consumers should use this surface — it's strictly more expressive than the v1.3 dict API: per-value `SpecValue` with `min/typ/max/unit/condition/notes/evidence`, evidence carrying `page/section/confidence/method`, pin `power_domain` references, `alt_functions[]`, structured trust gating, and tri-state nullability (missing vs present-below-gate vs trusted).
+
+```python
+from pathlib import Path
+from datasheet_types import DatasheetFacts, SpecValue, lookup, best, trusted, has_data
+
+cache_dir = Path("datasheets/extracted")
+facts: DatasheetFacts | None = lookup("LM2596-ADJ", cache_dir=cache_dir)
+
+if facts is None:
+    # Cache miss / malformed / wrong shape. Fall back to heuristic.
+    ...
+elif facts.stale:
+    # PDF hash changed or PDF missing. Re-extract before trusting.
+    ...
+else:
+    # Pinout: typed lookup helpers
+    en_pin = facts.base.pinout.find(name="EN")
+    if en_pin:
+        print(f"EN on pin {en_pin.numbers[0]}, domain={en_pin.power_domain}")
+
+    # Per-value trust gating
+    vin_max = best(facts.base.absolute_max.get("VIN"), min_confidence="medium")
+    if vin_max:
+        print(f"VIN abs max: {vin_max.typ or vin_max.max} {vin_max.unit} "
+              f"(page {vin_max.evidence.page}, confidence {vin_max.evidence.confidence})")
+
+    # Tri-state: distinguish "not extracted" from "present-but-below-gate"
+    theta = facts.base.thermal.get("theta_ja")
+    if not has_data(theta):
+        # Datasheet didn't specify
+        ...
+    elif not trusted(theta, min_confidence="medium"):
+        # Extracted but evidence below trust gate — surface to user
+        ...
+    else:
+        # Use the best trusted value
+        ...
+
+    # Category extensions
+    if facts.regulator:
+        topology = facts.regulator.topology  # "ldo" | "buck" | "boost" | ...
+        en_pin_num = facts.regulator.enable_pin
+        pg_pin_num = facts.regulator.power_good_pin
+```
+
+**Categories shipped in v1.4 (six):** `regulator`, `diode`, `transistor`, `opamp`, `mcu` (catalog tier), `crystal`. Each category extension is optional on `DatasheetFacts` — absent when the part doesn't fit the category. `mcu` Tier 2 (per-instance pin-mux detail) is deferred to v1.5.
+
+**Trust gates take an explicit `min_confidence`** (`"low" | "medium" | "high"`, keyword-only, required). Detectors declare their trust level per [spec §12](docs/datasheet-extraction-v2.md). `best()` and `trusted()` preserve extractor-intended ordering — no library-side re-ranking.
+
+**Staleness detection:** `lookup()` hashes the source PDF and compares to `source.sha256`. Three outcomes surface on `DatasheetFacts._cache_context`: fresh, `pdf_hash_mismatch`, `pdf_missing`. Read via `facts.stale` and `facts._cache_context.stale_reason`.
+
+**Quality scoring (v1.4):** three dimensions — pinout completeness, base completeness, category-extension completeness. Reserved v1.5 dimensions left empty. Score lives at `facts.extraction.quality_score` (0–100, not the v1.3 0.0–10.0 scale).
+
+For the canonical schemas, see `skills/datasheets/schemas/{base,pinout,spec_value,regulator,extraction,manifest}.schema.json`. For the cache directory convention, see `skills/datasheets/references/cache-layout.md`.
+
+## v1.3 compat layer (legacy)
+
+> **Status:** still supported in v1.4 — sunset planned for v1.6.
+>
+> Existing v1.3 caches keep working. The four public helpers (`get_regulator_features`, `get_mcu_features`, `get_pin_function`, `is_extraction_available`) preserve their v1.3 signatures and dict shapes byte-for-byte. Internally, they dual-read: v1.4 typed cache first, then fall back to v1.3 cache if no v1.4 extraction exists. When both caches exist for the same MPN (mid-migration state), v1.4 wins.
+>
+> **Why it's still here:** v1.4 MVP has no `mcu` category extension, so `get_mcu_features` on a v1.4 cache always returns None and falls through to v1.3 — the v1.3 cache is the only path to MCU peripheral data until v1.5. Some fields (`has_soft_start`, `iss_time_us`, `en_v_ih_max`, `en_v_il_min`) also have no v1.4 schema equivalent yet.
+>
+> **Why it's going away:** ~150 LOC of compat wrappers + dual-cache-read precedence is real complexity. Once v1.5 closes the mcu gap, the compat layer will be deprecated for one version and removed in v1.6. **All new detector code should use the v1.4 typed API above** — anything written against the v1.3 dict API today will need to be rewritten when the layer sunsets.
+
+The rest of this section describes the v1.3 cache format and dict API as they exist today. Everything below this point is accurate for existing v1.3 caches but should not be the starting point for new code.
+
+## Example v1.3 extraction output
+
+A per-MPN JSON file in the legacy v1.3 format looks like this (simplified):
 
 ```json
 {

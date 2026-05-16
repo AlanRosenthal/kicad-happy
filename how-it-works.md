@@ -54,9 +54,9 @@ The PCB analyzer (`analyze_pcb.py`) and Gerber analyzer (`analyze_gerbers.py`) f
 
 ### Step 2: Gather datasheets
 
-The agent downloads datasheets for every component with an MPN, using the distributor API skills (DigiKey, Mouser, LCSC, element14). PDFs are stored locally in a `datasheets/` directory with a `manifest.json` (legacy name: `index.json`). The **`datasheets` skill** then extracts structured specs from those PDFs into per-MPN JSON under `datasheets/extracted/`, scored on a five-dimension quality rubric — see the [Datasheet Extraction Guide](datasheet-extraction.md) for the full pipeline.
+The agent downloads datasheets for every component with an MPN, using the distributor API skills (DigiKey, Mouser, LCSC, element14). PDFs are stored locally in a `datasheets/` directory with a `manifest.json`. The **`datasheets` skill** then extracts structured specs from those PDFs into per-MPN JSON under `datasheets/extracted/`. v1.4 introduced a schema-driven typed extraction layer (`DatasheetFacts`, `SpecValue` with `min/typ/max/unit/condition/evidence`, six part categories, three-dimension quality scoring); the v1.3 dict-shaped format is still readable for legacy caches. See the [Datasheet Extraction Guide](datasheet-extraction.md) for the full pipeline.
 
-This step is critical. Without datasheets, a review can only check that a design is *self-consistent* (the schematic agrees with itself). With datasheets, it can check that the design is *correct* (component values match manufacturer recommendations, absolute maximum ratings aren't exceeded, reference circuits are followed). Every finding carries a confidence label (`deterministic`, `heuristic`, `datasheet-backed`) so the reviewer can see at a glance which claims are grounded in the manufacturer's spec.
+This step is critical. Without datasheets, a review can only check that a design is *self-consistent* (the schematic agrees with itself). With datasheets, it can check that the design is *correct* (component values match manufacturer recommendations, absolute maximum ratings aren't exceeded, reference circuits are followed). Every finding carries a confidence label (`deterministic`, `heuristic`, `datasheet-backed`) so the reviewer can see at a glance which claims are grounded in the manufacturer's spec. v1.4 adds per-value trust gating: detectors call `best(specs, min_confidence="medium")` to filter by evidence confidence, distinguishing "field not extracted" from "extracted but below trust gate" from "trusted value present."
 
 ### Step 3: Cross-reference and review
 
@@ -71,6 +71,10 @@ The agent reads the analysis JSON and datasheets together, then:
 ### Step 4: You review the review
 
 This is the most important step. The output is a starting point for engineering judgment, not a replacement for it. Every calculation is shown. Every datasheet reference is cited. Every finding includes enough context to verify or dismiss it.
+
+### Optional: Layer 2 LLM review (v1.4)
+
+v1.4 adds an optional **Layer 2 review platform** that overlays LLM judgment on top of the Layer 1 analyzer findings — confirming or suppressing individual findings based on declared design intent, escalating severity when context warrants it, and emitting reviewer observations that don't fit any detector. Layer 2 is additive and non-destructive: the Layer 1 baseline JSON is never modified, and stripping the overlay fields recovers a byte-identical Layer 1 result. Useful when a single deterministic severity is genuinely context-dependent — a 47kΩ I2C pull-up is `warning` by default but `error` on a 1MHz Fm+ bus, or `info` on a slow low-power sensor link. See `skills/kicad/review/README.md` for the contract and dispatcher recipe.
 
 ## What the analysis catches
 
@@ -245,5 +249,6 @@ This means every analyzer change is validated against real hardware designs befo
 - [Schematic analysis methodology](skills/kicad/scripts/methodology_schematic.md) — parsing pipeline, net building, 40 signal and domain detectors
 - [PCB layout analysis methodology](skills/kicad/scripts/methodology_pcb.md) — extraction, connectivity, DFM scoring, thermal analysis
 - [Gerber analysis methodology](skills/kicad/scripts/methodology_gerbers.md) — RS-274X/Excellon parsing, layer identification, completeness checks
-- [Example design review report](example-report.md) — full output from a real ESP32-S3 board analysis
+- [Example design review report (robot controller)](example-report-1.md) — full output from a real motor-controller board
+- [Example design review report (GNSSDO)](example-report-2.md) — full output from a real GNSS disciplined oscillator board
 - [Analysis scripts README](skills/kicad/scripts/README.md) — developer reference for the Python scripts

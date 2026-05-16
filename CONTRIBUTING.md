@@ -8,8 +8,8 @@ Thanks for your interest in contributing. This guide covers the project structur
 skills/
 ├── kicad/           # Core analysis skill (schematic, PCB, Gerber, thermal, diff, what-if)
 │   ├── SKILL.md     # Skill definition with triggers and usage docs
-│   ├── scripts/     # Python analysis scripts (zero-dep, Python 3.8+)
-│   └── references/  # Deep methodology guides (19 files)
+│   ├── scripts/     # Python analysis scripts (zero-dep, Python 3.10+)
+│   └── references/  # Deep methodology guides (18 files)
 ├── datasheets/      # Structured extraction pipeline — per-MPN cache, quality scoring, consumer API
 ├── emc/             # EMC pre-compliance (44 rules, 18 categories)
 ├── spice/           # SPICE simulation (ngspice/LTspice/Xyce)
@@ -29,29 +29,34 @@ Each skill has a `SKILL.md` with YAML frontmatter (name, description, triggers) 
 
 | File | LOC | Purpose |
 |------|-----|---------|
-| `kicad/scripts/analyze_schematic.py` | ~9,300 | S-expression parser + schematic analysis orchestrator |
+| `kicad/scripts/analyze_schematic.py` | ~9,500 | S-expression parser + schematic analysis orchestrator |
 | `kicad/scripts/signal_detectors.py` | ~4,400 | Core signal path detectors (regulators, filters, opamps, dividers, crystals, protection) |
 | `kicad/scripts/domain_detectors.py` | ~6,100 | Domain-specific detectors (Ethernet, USB-C, BMS, motor drive, sensors, audio, LEDs, etc.) |
-| `kicad/scripts/validation_detectors.py` | ~1,000 | Validation detectors (pull-ups, voltage mismatch, protocol buses, power sequencing, feedback stability) |
-| `kicad/scripts/analyze_pcb.py` | ~6,600 | PCB layout analysis (footprints, tracks, vias, zones, DFM, assembly checks, connectivity graph) |
-| `kicad/scripts/analyze_gerbers.py` | ~1,400 | Gerber/Excellon verification |
-| `kicad/scripts/cross_analysis.py` | ~430 | Schematic + PCB cross-domain checks |
-| `kicad/scripts/finding_schema.py` | ~330 | Rich finding factory, `Det` constants, consumer helpers, trust_summary aggregation |
-| `kicad/scripts/output_filters.py` | ~460 | Stage/audience filtering for all analyzers |
-| `kicad/scripts/kicad_utils.py` | ~860 | Shared utilities (component classification, value parsing, net detection, switching frequencies) |
-| `kicad/scripts/kicad_types.py` | ~110 | `AnalysisContext` dataclass — shared state for all detectors |
-| `kicad/scripts/sexp_parser.py` | ~220 | S-expression parser shared by schematic and PCB analyzers |
-| `emc/scripts/emc_rules.py` | ~4,200 | 44 EMC rule implementations |
-| `emc/scripts/emc_formulas.py` | ~1,350 | Radiation formulas, harmonic analysis, PDN impedance |
-| `emc/scripts/emc_spice.py` | ~700 | SPICE-enhanced PDN, filter insertion loss, harmonic FFT |
-| `datasheets/scripts/datasheet_extract_cache.py` | ~430 | Per-MPN extraction cache manager |
-| `datasheets/scripts/datasheet_features.py` | — | Consumer API for analyzers (get_regulator_features, get_mcu_features, etc.) |
+| `kicad/scripts/validation_detectors.py` | ~1,300 | Validation detectors (pull-ups, voltage mismatch, protocol buses, power sequencing, feedback stability) |
+| `kicad/scripts/lookup_detectors.py` | ~700 | v1.4 datasheet-backed detectors (AM-001, OV-001, FT-001, PM-001, EX-001 via Phase 2 lookup API) |
+| `kicad/scripts/analyze_pcb.py` | ~6,700 | PCB layout analysis (footprints, tracks, vias, zones, DFM, assembly checks, connectivity graph) |
+| `kicad/scripts/analyze_gerbers.py` | ~1,700 | Gerber/Excellon verification |
+| `kicad/scripts/cross_analysis.py` | ~1,100 | Schematic + PCB cross-domain checks |
+| `kicad/scripts/finding_schema.py` | ~680 | Rich finding factory, `Det` constants, consumer helpers, trust_summary aggregation |
+| `kicad/scripts/output_filters.py` | ~470 | Stage/audience filtering for all analyzers |
+| `kicad/scripts/kicad_utils.py` | ~2,000 | Shared utilities (component classification, value parsing, net detection, switching frequencies) |
+| `kicad/scripts/kicad_types.py` | ~120 | `AnalysisContext` dataclass — shared state for all detectors |
+| `kicad/scripts/sexp_parser.py` | ~230 | S-expression parser shared by schematic and PCB analyzers |
+| `kicad/scripts/analyzer_envelope.py` | ~300 | Typed envelope dataclasses (Finding, Assessment, TrustSummary, InputsBlock, CompatBlock) — single source of truth for analyzer output shape |
+| `emc/scripts/emc_rules.py` | ~4,250 | 44 EMC rule implementations |
+| `emc/scripts/emc_formulas.py` | ~1,400 | Radiation formulas, harmonic analysis, PDN impedance |
+| `emc/scripts/emc_spice.py` | ~710 | SPICE-enhanced PDN, filter insertion loss, harmonic FFT |
+| `datasheets/scripts/datasheet_extract_cache.py` | ~540 | Per-MPN extraction cache manager |
+| `datasheets/scripts/datasheet_features.py` | ~380 | Consumer API for analyzers (get_regulator_features, get_mcu_features, etc.) — v1.4 dual-cache-read path |
+| `datasheets/scripts/datasheet_lookup.py` | ~240 | v1.4 typed `lookup(mpn) → DatasheetFacts` facade with staleness detection |
+| `datasheets/datasheet_types/` | — | v1.4 typed access layer (DatasheetFacts, SpecValue, Pin, Pinout, trust_gating helpers) |
+| `kicad/review/scripts/merge_annotations.py` | — | Layer 2 review overlay merge: validates + applies review annotations to `analysis/merged/<analyzer>.json` |
 
 ### Zero-dependency policy
 
-All analysis scripts use Python 3.8+ standard library only. No pip install, no Docker, no KiCad installation needed. This is a hard requirement — it means the scripts run anywhere with a Python interpreter.
+All analysis scripts use Python 3.10+ standard library only. No pip install, no Docker, no KiCad installation needed. This is a hard requirement — it means the scripts run anywhere with a Python interpreter.
 
-Optional dependencies (`requests`, `playwright`) are only used for datasheet downloading and web scraping fallbacks. They are never imported by the core analysis path.
+Optional dependencies (`requests`, `playwright`, `pdftotext`) are only used for datasheet downloading and web-scraping / PDF-text-extraction fallbacks. They are never imported by the core analysis path.
 
 ## How signal detectors work
 
@@ -84,9 +89,11 @@ Detectors live in one of two files:
 - `signal_detectors.py` — core circuit analysis (regulators, filters, dividers, opamps, transistors, crystals, protection, current sense, decoupling)
 - `domain_detectors.py` — domain-specific / application-level detectors (interfaces, peripherals, power path, sensors, audio, LEDs)
 
-A detector function follows this pattern:
+A detector function follows this pattern, emitting findings via the `make_finding()` factory in `finding_schema.py`:
 
 ```python
+from finding_schema import make_finding, Det
+
 def detect_my_circuit(ctx: AnalysisContext, prior_results=None) -> list[dict]:
     """Detect [circuit type] and validate [what]."""
     findings = []
@@ -98,17 +105,23 @@ def detect_my_circuit(ctx: AnalysisContext, prior_results=None) -> list[dict]:
         neighbors = _get_net_components(ctx, net_name, comp["reference"])
         # 3. Compute derived values (voltage, frequency, current, etc.)
         # 4. Check against rules/thresholds
-        # 5. Append findings with severity
-        findings.append({
-            "type": "my_circuit",
-            "reference": comp["reference"],
-            "severity": "WARNING",  # or INFO, SUGGESTION
-            "details": { ... }
-        })
+        # 5. Emit a rich finding (factory enforces severity / confidence / evidence_source enums)
+        findings.append(make_finding(
+            detector=Det.MY_CIRCUIT,
+            rule_id="MC-001",
+            category="signal",
+            severity="warning",          # error | warning | info
+            confidence="deterministic",  # deterministic | heuristic | datasheet-backed
+            evidence_source="topology",  # see finding_schema for the full enum
+            summary=f"{comp['reference']}: ...",
+            recommendation="...",
+            components=[comp["reference"]],
+            report_context={"value": parsed_value, ...},
+        ))
     return findings
 ```
 
-Then register it in `analyze_schematic.py`'s `analyze_signal_paths()` function, where the detector call order is defined.
+Then register the new `Det` constant in `finding_schema.py` and call the detector from `analyze_schematic.py`'s `analyze_signal_paths()`, where the detector call order is defined.
 
 ### Adding an EMC rule
 
@@ -174,7 +187,7 @@ Changes to any analysis script must be validated against the [test harness](http
 | Layer | What it catches | How |
 |-------|----------------|-----|
 | **Crash testing** | Parser errors, unhandled exceptions, edge cases | Runs every analyzer against every file in the corpus |
-| **Regression assertions** | Output drift, lost detections, changed values | 2M+ assertions on known-good outputs |
+| **Regression assertions** | Output drift, lost detections, changed values | 2.3M+ assertions on known-good outputs |
 | **Bugfix guards** | Previously fixed bugs returning | Targeted assertions on specific past failures |
 | **Equation audits** | Formula correctness | 107 equations tracked with primary source citations |
 | **Constant audits** | Magic numbers drifting | 105+ switching frequencies + other constants tracked, 0 critical-risk |
@@ -218,7 +231,7 @@ The harness agent executes test plans and reports results. After validation, the
 
 ## Code style
 
-- **Python 3.8+ compatibility** — no walrus operators, no `match` statements, no `type` aliases. Use `from __future__ import annotations` for modern type hints.
+- **Python 3.10+ compatibility** — modern type hints (`X | None`, `list[int]`) are fine. Walrus operators and `match` statements are allowed. Avoid PEP 695 `type` aliases (3.12-only).
 - **No external dependencies** in analysis scripts — stdlib only.
 - **Functions over classes** — detectors are plain functions that take `AnalysisContext` and return lists.
 - **Inline comments for equations** — tag with `# EQ-NNN: formula_name (source)` so the harness can track them.

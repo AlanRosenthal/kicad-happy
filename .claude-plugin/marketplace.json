@@ -4,13 +4,13 @@
     "name": "aklofas"
   },
   "metadata": {
-    "description": "AI-powered KiCad electronics design skills — schematic analysis, PCB review, component sourcing, BOM management, and manufacturing prep."
+    "description": "AI-powered KiCad design review — schematic analysis, PCB layout review, EMC pre-compliance, SPICE simulation, datasheet extraction, BOM sourcing across DigiKey/Mouser/LCSC/element14, and fab prep for JLCPCB/PCBWay."
   },
   "plugins": [
     {
       "name": "kicad-happy",
       "source": "./",
-      "description": "KiCad electronics design skills. Analyze schematics, review PCB layouts, download datasheets, source components, manage BOMs, and prep boards for fabrication.",
+      "description": "KiCad electronics design review. Parse schematics and PCB layouts, run EMC pre-compliance and SPICE simulation, extract structured specs from datasheet PDFs, source components from major distributors, and prep boards for fabrication. Catches real design bugs before you order.",
       "version": "1.4.0-rc.1",
       "author": { "name": "aklofas" }
     }

@@ -651,6 +651,62 @@ All schematic rule findings appear in `findings[]`. The following rule IDs are p
 
 SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 severity varies by confidence level in the detected source. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin.
 
+## Layer 2 LLM Review (v1.4, optional)
+
+The analyzers above produce **Layer 1**: deterministic + heuristic findings emitted by detector code. v1.4 adds an optional **Layer 2** review platform at `skills/kicad/review/` that overlays LLM judgment on top of Layer 1 findings — confirming, suppressing, or escalating individual findings with structured annotations, plus emitting reviewer observations that don't fit any detector.
+
+Layer 2 is **additive and non-destructive**. Layer 1 outputs in `analysis/<analyzer>.json` are never modified. Merged outputs land at `analysis/merged/<analyzer>.json`. Stripping the `llm_*` fields from a merged output yields a byte-identical Layer 1 baseline.
+
+### When to invoke Layer 2
+
+Trigger Layer 2 for **design reviews where a single deterministic severity (warning vs error vs info) is genuinely context-dependent** — for example: a 47kΩ I2C pull-up is `warning` by default but `error` if the design context says "1MHz Fm+", or `info` if it says "low-power slow-bus sensor." Layer 2 lets the reviewer subagent escalate or suppress findings based on declared design intent.
+
+Skip Layer 2 for routine checks where Layer 1 severities already match the user's risk model.
+
+### Workflow
+
+```bash
+# 1. Build the 2-task review plan (design_context + reviewer)
+python3 <skill-path>/review/scripts/build_review_plan.py \
+  --analysis-dir analysis/<run_id>/ \
+  --output analysis/<run_id>/review_plan.json
+
+# 2. Dispatch each task per the Phase 4 dispatcher recipe:
+#    - design_context (Tier B): reads schematic.json + .kicad-happy.json,
+#      emits analysis/design_context.json (closed-set enums per the schema)
+#    - reviewer (Tier A): reads Layer 1 findings + design_context.json,
+#      emits analysis/review_annotations.json with confirm/suppress/escalate
+#      per finding plus up to 5 reviewer observations
+
+# 3. Validate the reviewer output before merging
+python3 <skill-path>/review/scripts/validate_review.py \
+  analysis/<run_id>/review_annotations.json
+
+# 4. Merge the overlay into analysis/merged/<analyzer>.json
+python3 <skill-path>/review/scripts/merge_annotations.py \
+  --analysis-dir analysis/<run_id>/ \
+  --annotations analysis/<run_id>/review_annotations.json
+```
+
+### Output shape
+
+- `analysis/design_context.json` — structured design intent (target market, certification scope, lifecycle stage, power budget, deployment environment). Closed-set enums per `review/schemas/design_context.schema.json`. Used by Layer 1 detectors for severity tuning AND by the Layer 2 reviewer subagent.
+- `analysis/review_annotations.json` — per-finding `decision: "confirm" | "suppress" | "escalate"` with a `reason` (≥20 chars required), an optional `severity_override`, and up to 5 free-form `reviewer_observations` (capped at confidence `"medium"`). Schema in `review/schemas/review_annotations.schema.json`.
+- `analysis/merged/<analyzer>.json` — Layer 1 baseline with `llm_decision`, `llm_reason`, `llm_severity_override`, and `llm_reviewer_observations` appended per finding. Strip those fields and you recover the Layer 1 baseline byte-for-byte.
+
+### Hard invariants (enforced by merge_annotations.py)
+
+- **HI-2**: Merged outputs differ from Layer 1 baseline only in overlay fields. No new findings, no removed findings, no reordered findings.
+- **HI-3**: `strip-llm` round-trip is byte-identical.
+- **HI-8**: Reviewer suppression rate capped at 30% per analyzer. Annotations exceeding the cap are dropped with a warning in the merge report (the merge itself never fails on this).
+- **HI-9**: Orphan annotations (referencing a `finding_id` not in the baseline) are logged and skipped, not merged.
+
+### v1.4 status
+
+Layer 2 ships **active but uncalibrated**. Schemas, scripts, and prompts are stable; the reviewer subagent produces schema-valid annotations end-to-end. Precision/recall calibration against a labeled corpus is deferred to v1.5 — so treat reviewer observations as suggestions to verify, not as authoritative judgments. Layer 1 findings remain the source of truth for any go/no-go decision.
+
+For the full Layer 2 design contract (hard invariants, dispatcher recipe, prompt scaffolding), see `skills/kicad/review/README.md`.
+
 ## Reference Files
 
 Detailed methodology and format documentation lives in reference files. Read these as needed — they provide deep-dive content beyond what the scripts output automatically.
