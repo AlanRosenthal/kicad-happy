@@ -37,6 +37,28 @@ def _sev_icon(raw_sev):
     return _SEV_ICON.get(normalize_severity(raw_sev), "\U0001f7e1")
 
 
+def _summary_counts(summary_block):
+    """Extract (error_count, warning_count, total_count) from an analyzer's
+    summary block, accepting both v1.4 and legacy shapes.
+
+    v1.4: summary.by_severity = {"error": N, "warning": N, "info": N},
+          summary.total_findings.
+    Legacy (cached v1.3.1): summary.critical, summary.high, summary.total_checks.
+
+    Returns (0, 0, 0) for empty/missing summary. Reading both shapes is the
+    fix for the EMC+thermal stale-key bug that shipped in 8daa28d (T5b's
+    synthetic smoke test masked the read-side mismatch; see memory
+    feedback_smoke_test_real_fixtures).
+    """
+    if not summary_block:
+        return (0, 0, 0)
+    by_sev = summary_block.get("by_severity") or {}
+    err = by_sev.get("error", summary_block.get("critical", 0))
+    warn = by_sev.get("warning", summary_block.get("high", 0))
+    total = summary_block.get("total_findings", summary_block.get("total_checks", 0))
+    return (err, warn, total)
+
+
 def _load_json(path):
     if not path or not os.path.isfile(path):
         return None
@@ -475,15 +497,15 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
     if emc:
         emc_summary = emc.get("summary", {})
         emc_score = emc_summary.get("emc_risk_score", 0)
-        emc_crit = emc_summary.get("critical", 0)
-        emc_high = emc_summary.get("high", 0)
-        emc_checks = emc_summary.get("total_checks", 0)
-        if emc_crit > 0:
-            findings.append(("critical", f"EMC: {emc_crit} critical finding(s) — score {emc_score}/100", "emc"))
-        if emc_high > 0:
-            findings.append(("warning", f"EMC: {emc_high} high-risk finding(s)", "emc"))
-        if emc_checks > 0 and emc_crit == 0 and emc_high == 0:
-            verified.append(f"EMC risk score {emc_score}/100 — no critical/high findings")
+        # v1.4 EMC emits summary.by_severity (was critical/high legacy keys).
+        # _summary_counts() handles both shapes for forward + backward compat.
+        emc_err, emc_warn, emc_total = _summary_counts(emc_summary)
+        if emc_err > 0:
+            findings.append(("critical", f"EMC: {emc_err} error-severity finding(s) — score {emc_score}/100", "emc"))
+        if emc_warn > 0:
+            findings.append(("warning", f"EMC: {emc_warn} warning-severity finding(s)", "emc"))
+        if emc_total > 0 and emc_err == 0 and emc_warn == 0:
+            verified.append(f"EMC risk score {emc_score}/100 — no error/warning findings")
 
     # Count findings AFTER all append paths so EMC/voltage-derating/protocol
     # entries flow into has-critical / findings-count (audit F1.2).
@@ -712,20 +734,20 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
                 L.append(f"- ⚠️ {r.get('subcircuit_type','')} ({comps}): {note}")
         L.append("")
 
-    # === EMC (one-liner summary + critical/high findings) ===
+    # === EMC (one-liner summary + error-severity findings) ===
     if emc:
         emc_s = emc.get("summary", {})
-        emc_total = emc_s.get("total_checks", 0)
         emc_score = emc_s.get("emc_risk_score", 0)
-        emc_crit = emc_s.get("critical", 0)
-        emc_high = emc_s.get("high", 0)
+        # v1.4 EMC: by_severity + total_findings. Legacy fallback for cached
+        # v1.3.1 envelopes via _summary_counts().
+        emc_crit, emc_high, emc_total = _summary_counts(emc_s)
 
         L.append("### EMC")
         L.append("")
         emc_suppressed = emc_s.get("suppressed", 0)
         sup_str = f", {emc_suppressed} suppressed" if emc_suppressed else ""
         L.append(f"Risk score **{emc_score}/100** — {emc_total} checks: "
-                 f"{emc_crit} critical, {emc_high} high{sup_str}")
+                 f"{emc_crit} error, {emc_high} warning{sup_str}")
 
         for f in emc.get("findings", []):
             if f.get("suppressed"):
@@ -743,9 +765,9 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
     if thermal:
         ts = thermal.get("summary", {})
         th_score = ts.get("thermal_score", 0)
-        th_crit = ts.get("critical", 0)
-        th_high = ts.get("high", 0)
-        th_total = ts.get("total_checks", 0)
+        # v1.4 thermal emits summary.by_severity + total_findings (was legacy
+        # critical/high + total_checks). _summary_counts() handles both.
+        th_err, th_warn, th_total = _summary_counts(ts)
         th_pdiss = ts.get("total_board_dissipation_w", 0)
 
         if th_total > 0:
@@ -768,8 +790,8 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
                     L.append(f"- {_sev_icon(sev)} {rule}: {title}")
             L.append("")
 
-        if th_crit == 0 and th_high == 0 and th_total > 0:
-            verified.append(f"Thermal score {th_score}/100 — no critical/high findings")
+        if th_err == 0 and th_warn == 0 and th_total > 0:
+            verified.append(f"Thermal score {th_score}/100 — no error/warning findings")
 
     # === Missing Information ===
     mi_lines = _render_missing_info(sch, thermal)
@@ -1274,7 +1296,9 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path,
     if thermal:
         ts = thermal.get("summary", {})
         th_score = ts.get("thermal_score", 0)
-        th_total = ts.get("total_checks", 0)
+        # v1.4 thermal: total_findings (was legacy total_checks). _summary_counts()
+        # is overkill here since we only need the total; inline the fallback.
+        th_total = ts.get("total_findings", ts.get("total_checks", 0))
         th_pdiss = ts.get("total_board_dissipation_w", 0)
         th_suppressed = ts.get("suppressed", 0)
 
