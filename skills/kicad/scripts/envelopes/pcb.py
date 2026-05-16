@@ -95,14 +95,16 @@ class PCBStatistics:
 @dataclass
 class PCBSetup:
     """Setup block extracted from (setup ...)."""
-    board_thickness_mm: float = field(metadata={
-        "description": "Stackup thickness in mm."})
     pad_to_mask_clearance: float = field(metadata={
         "description": "Soldermask clearance in mm."})
     legacy_teardrops: str = field(metadata={
         "description": "Legacy teardrop flag: 'yes' | 'no'."})
     allow_soldermask_bridges: str = field(metadata={
         "description": "Soldermask bridge allowance: 'yes' | 'no'."})
+    # Optional fields (must come after non-defaulted fields per dataclass rules):
+    board_thickness_mm: Optional[float] = field(default=None, metadata={
+        "description": "Stackup thickness in mm; null when the source file "
+                       "has no (general (thickness ...)) entry. TH-043."})
 
 
 @dataclass
@@ -235,12 +237,6 @@ class PCBEnvelope:
         "description": "Board setup block (thickness, soldermask, etc.)."})
     board_outline: BoardOutline = field(metadata={
         "description": "Edge.Cuts outline geometry + bounding box."})
-    board_thickness_mm: float = field(metadata={
-        "description": "Stackup thickness (mm); duplicated from setup for "
-                       "downstream consumers."})
-    board_metadata: dict = field(metadata={
-        "description": "Board metadata bag (paper size, title block "
-                       "fragments, etc.)."})
     connectivity: Connectivity = field(metadata={
         "description": "Routing completeness rollup."})
     tracks: Tracks = field(metadata={
@@ -307,12 +303,25 @@ class PCBEnvelope:
                        "front_density_per_cm2, optional back_density_per_cm2."})
     dfm_summary: dict = field(metadata={
         "description": "DFM rollup: dfm_tier, metrics, violation_count."})
-    design_rule_compliance: dict = field(metadata={
-        "description": "Design rule compliance: compliant, rules_checked, "
-                       "rules_source."})
     project_settings: dict = field(metadata={
         "description": "Selected settings extracted from .kicad_pro: "
                        "source, net_classes, design_rules."})
+
+    # --- Defaulted-fields tail (must come after all non-default fields per
+    # dataclass rules). TH-043: schema-required keys that the emitter
+    # sometimes drops, now defaulted to empty so they're always present. ---
+    design_rule_compliance: dict = field(default_factory=dict, metadata={
+        "description": "Design rule compliance: compliant, rules_checked, "
+                       "rules_source; empty dict when project_settings "
+                       "missing or compliance not computed. TH-043."})
+    board_thickness_mm: Optional[float] = field(default=None, metadata={
+        "description": "Stackup thickness (mm); duplicated from setup for "
+                       "downstream consumers. Null when the source file "
+                       "has no (general (thickness ...)) entry. TH-043."})
+    board_metadata: dict = field(default_factory=dict, metadata={
+        "description": "Board metadata bag (paper size, title block "
+                       "fragments, etc.); empty dict when no metadata "
+                       "extracted. TH-043."})
 
     # --- Phase 4 capability pointer ---
     capability_mode_ref: Optional[dict] = field(default=None, metadata={

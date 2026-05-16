@@ -57,12 +57,16 @@ class ThermalSummary:
 
 @dataclass
 class ThermalMissingInfo:
-    default_rtheta_ja: list[str] = field(metadata={
+    default_rtheta_ja: list[str] = field(default_factory=list, metadata={
         "description": "Component references that used a package-default Rθ_JA "
-                       "because no datasheet value was available."})
-    default_tj_max: list[str] = field(metadata={
+                       "because no datasheet value was available. Empty when "
+                       "every assessed component had a datasheet-sourced "
+                       "Rθ_JA. TH-043."})
+    default_tj_max: list[str] = field(default_factory=list, metadata={
         "description": "Component references that used a default max junction "
-                       "temperature (typically 125 °C)."})
+                       "temperature (typically 125 °C). Empty when every "
+                       "assessed component had a datasheet-sourced Tj_max. "
+                       "TH-043."})
 
 
 @dataclass

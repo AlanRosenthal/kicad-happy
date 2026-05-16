@@ -1057,15 +1057,18 @@ def main():
 
     elapsed = time.monotonic() - t0
 
-    # Missing information — components with default thermal parameters
-    missing_info = {}
+    # Missing information — components with default thermal parameters.
+    # Always include both keys (with [] when nothing missing) so the
+    # ThermalMissingInfo schema is satisfied whenever the block is
+    # emitted (TH-043). The outer `if missing_info:` guard below still
+    # gates whether to emit the block at all.
     default_rtheta = [a["ref"] for a in assessments
                       if a.get("rtheta_ja_source") == "default"]
-    if default_rtheta:
-        missing_info["default_rtheta_ja"] = default_rtheta
     default_tjmax = [a["ref"] for a in assessments
                      if a.get("tj_max_source") == "default_125"]
-    if default_tjmax:
+    missing_info = {}
+    if default_rtheta or default_tjmax:
+        missing_info["default_rtheta_ja"] = default_rtheta
         missing_info["default_tj_max"] = default_tjmax
 
     result = {

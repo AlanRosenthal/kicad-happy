@@ -3231,6 +3231,7 @@ def parse_legacy_schematic(path: str, analysis_dir: str | Path | None = None) ->
         "trust_summary": compute_trust_summary(findings),
         "kicad_version": "5 (legacy)",
         "file_version": "4",
+        "title_block": {},  # legacy .sch has no (title_block ...) node (TH-043)
         "sheets_parsed": len(sheets_parsed),
         "sheet_files": sheets_parsed,
         "statistics": stats,

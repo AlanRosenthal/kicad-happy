@@ -747,6 +747,9 @@ def check_completeness(gerbers: list[dict], drills: list[dict],
 
     return {
         "found_layers": sorted(found_layers),
+        # expected_layers is schema-required; on the defaults path there's
+        # no .gbrjob to declare expectations, so emit [] honestly (TH-043).
+        "expected_layers": [],
         "missing_required": sorted(required - found_layers),
         "missing_recommended": sorted(recommended - found_layers),
         "has_pth_drill": any(d.get("type") in ("PTH", "mixed") for d in drills),
@@ -1021,9 +1024,12 @@ def build_pad_summary(gerbers: list[dict], drill_class: dict) -> dict:
         "heatsink_apertures": heatsink,
         "tht_holes": tht,
         "smd_source": smd_source,
+        # smd_ratio is a schema-required key; emit 0.0 when nothing to
+        # ratio (no SMD pads and no plated holes) so the schema-vs-emit
+        # drift can't surface (TH-043).
+        "smd_ratio": (round(smd / (smd + tht), 2)
+                      if smd + tht > 0 else 0.0),
     }
-    if smd + tht > 0:
-        result["smd_ratio"] = round(smd / (smd + tht), 2)
 
     return result
 

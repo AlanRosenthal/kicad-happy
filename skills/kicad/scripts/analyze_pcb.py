@@ -6310,9 +6310,10 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     if proximity:
         result["trace_proximity"] = analyze_trace_proximity(tracks, net_names)
 
-    # New extraction sections — always include if non-empty
-    if metadata:
-        result["board_metadata"] = metadata
+    # board_metadata + design_rule_compliance are required envelope keys
+    # (schema declares them dict not Optional[dict]). Always emit, even
+    # when empty, so schema-vs-emit drift can't surface (TH-043).
+    result["board_metadata"] = metadata or {}
     if dimensions:
         result["dimensions"] = dimensions
     if groups:
@@ -6322,12 +6323,14 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     if project_settings:
         result["project_settings"] = project_settings
 
-    # Design rule compliance (project rules vs actual layout)
+    # Design rule compliance (project rules vs actual layout) — always emit
+    # at least an empty dict so the schema-required key is present.
     if project_settings:
         design_compliance = analyze_design_rule_compliance(
             tracks, vias, project_settings)
-        if design_compliance:
-            result["design_rule_compliance"] = design_compliance
+        result["design_rule_compliance"] = design_compliance or {}
+    else:
+        result["design_rule_compliance"] = {}
 
     # Manufacturing and assembly analysis
     if dfm:
