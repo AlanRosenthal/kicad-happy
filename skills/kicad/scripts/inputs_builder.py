@@ -46,8 +46,16 @@ def build_inputs(
         Pre-built mapping of stage name -> UpstreamArtifact dict. Passed
         through as-is; callers are responsible for correct shape.
     run_id : str | None, optional
-        Explicit run_id; generated via ``run_id.generate_run_id()`` if
-        omitted.
+        Explicit run_id. **In production every analyzer call site passes
+        this explicitly from `capability_mode_ref["run_id"]`** so the
+        envelope's `inputs.run_id` is byte-identical to the canonical
+        capability_mode record (audit A1/A2, locked harness-side by
+        `validate/validate_run_id.py`). The auto-gen fallback below
+        only triggers for test fixtures and synthetic harness cases
+        that intentionally bypass capability_mode (see
+        `tests/contract/test_inputs_builder.py::test_run_id_auto_generated_when_omitted`).
+        Calling this without a run_id from product code would produce a
+        non-canonical envelope that fails `validate_run_id.py` — don't.
     """
     paths = [Path(f) for f in source_files]
     source_hashes = {str(p): _sha256_file(p) for p in paths}
@@ -55,6 +63,8 @@ def build_inputs(
     return {
         "source_files": [str(p) for p in paths],
         "source_hashes": source_hashes,
+        # Auto-gen fallback is for test fixtures only. Production callers
+        # pass capability_mode_ref["run_id"] — see docstring above.
         "run_id": run_id or generate_run_id(),
         "config_hash": config_hash,
         "upstream_artifacts": upstream_artifacts or {},

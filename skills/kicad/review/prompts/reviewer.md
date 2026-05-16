@@ -11,7 +11,7 @@ You will receive these file paths:
 - `analysis/pcb.json` — PCB analyzer findings
 - `analysis/emc.json` — EMC analyzer findings
 - `analysis/thermal.json` — thermal analyzer findings
-- `analysis/cross.json` (if present) — cross-domain analyzer findings
+- `analysis/cross_analysis.json` (if present) — cross-domain analyzer findings
 - `datasheets/extracted/<MPN>.json` for any MPN referenced in findings (consult as needed)
 
 ## Output

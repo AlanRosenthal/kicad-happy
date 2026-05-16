@@ -50,6 +50,7 @@ def build_plan(analysis_dir):
                     str(analysis_dir / "pcb.json"),
                     str(analysis_dir / "emc.json"),
                     str(analysis_dir / "thermal.json"),
+                    str(analysis_dir / "cross_analysis.json"),
                     str(analysis_dir / "design_context.json"),
                 ],
                 "depends_on": ["design_context"],

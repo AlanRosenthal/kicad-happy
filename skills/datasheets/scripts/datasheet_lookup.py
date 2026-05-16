@@ -50,7 +50,7 @@ from datasheet_types.extraction import DatasheetFacts  # noqa: E402
 # Matches [A-Za-z0-9_-]; everything else is replaced with _.
 # Simpler than v1.3's scheme (which appended an MD5 suffix to avoid
 # collisions) — the MPN character set is narrow enough in practice.
-_UNSAFE_CHAR = re.compile(r"[^A-Za-z0-9_\-]")
+_UNSAFE_CHAR = re.compile(r"[^A-Za-z0-9_.\-]")
 
 # Stale-reason enum values — consumed by Track 2.4 trust gating and by
 # consumers that want to display a human-readable reason. Kept as module
@@ -63,13 +63,20 @@ STALE_PDF_HASH_MISMATCH = "pdf_hash_mismatch"
 def sanitize_mpn(mpn: str) -> str:
     """Convert an MPN to a filename-safe component.
 
-    Strips whitespace; replaces any non-[A-Za-z0-9_-] character with '_'.
-    No hash suffix — rare collisions are acceptable for v1.4.
+    Strips whitespace; replaces any non-[A-Za-z0-9_.-] character with '_'.
+    Dots and hyphens are preserved because they appear in valid MPNs
+    (crystals like `ABM8G-106-12.000MHZ-T`, hyphenated families like
+    `LM2596-ADJ`). This MUST match the planner/merger which write
+    literal MPN-named files via `plan_extraction.py` and `merge_results.py`
+    — earlier divergence (dot-stripping here) caused silent cache misses
+    for dot-containing MPNs (audit C1, LOG entry 63). No hash suffix —
+    rare collisions are acceptable for v1.4.
 
     Examples:
-        sanitize_mpn("LM2596-ADJ")   -> "LM2596-ADJ"
-        sanitize_mpn("STM32/F103")   -> "STM32_F103"
-        sanitize_mpn(" ACME 1234 ")  -> "ACME_1234"
+        sanitize_mpn("LM2596-ADJ")             -> "LM2596-ADJ"
+        sanitize_mpn("ABM8G-106-12.000MHZ-T")  -> "ABM8G-106-12.000MHZ-T"
+        sanitize_mpn("STM32/F103")             -> "STM32_F103"
+        sanitize_mpn(" ACME 1234 ")            -> "ACME_1234"
     """
     return _UNSAFE_CHAR.sub("_", mpn.strip())
 

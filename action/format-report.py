@@ -59,6 +59,70 @@ def _summary_counts(summary_block):
     return (err, warn, total)
 
 
+def _emc_one_liner(emc_summary, *, include_suppressed: bool) -> str:
+    """Return the EMC score/checks/severity one-liner used by both report
+    paths. Compact PR comment includes the suppressed count inline; full
+    step summary historically omitted it. Caller picks via kwarg.
+
+    Extracted in rc.2 carry-over #22 — the EMC stale-key fix at commit
+    `693b664` had to be applied at one site and missed the other (caught
+    in a follow-up cycle). Routing both paths through this helper makes
+    that bug class structurally impossible.
+    """
+    score = emc_summary.get("emc_risk_score", 0)
+    err, warn, total = _summary_counts(emc_summary)
+    sup_str = ""
+    if include_suppressed:
+        suppressed = emc_summary.get("suppressed", 0)
+        if suppressed:
+            sup_str = f", {suppressed} suppressed"
+    return (f"Risk score **{score}/100** — {total} checks: "
+            f"{err} error, {warn} warning{sup_str}")
+
+
+def _render_thermal_block(thermal, *, heading_level: int) -> list[str]:
+    """Return the thermal section lines (heading + score + finding bullets)
+    used by both report paths. `heading_level` is 2 (`##`) for the full
+    step summary and 3 (`###`) for the compact PR comment.
+
+    Returns `[]` when thermal is None/empty or total_findings is 0 — caller
+    appends nothing in that case. Suppressed count is always included inline
+    when present.
+
+    Extracted in rc.2 carry-over #22 — the B3 thermal-compact fix had to
+    be applied at one site; routing both paths through this helper closes
+    the duplicate-edit bug class.
+    """
+    if not thermal:
+        return []
+    ts = thermal.get("summary", {})
+    score = ts.get("thermal_score", 0)
+    _, _, total = _summary_counts(ts)
+    if total <= 0:
+        return []
+    pdiss = ts.get("total_board_dissipation_w", 0)
+    suppressed = ts.get("suppressed", 0)
+    heading = "#" * heading_level + " Thermal Analysis"
+    sup_str = f", {suppressed} suppressed" if suppressed else ""
+    lines = [
+        heading,
+        "",
+        (f"Score **{score}/100** — {total} checks, "
+         f"total dissipation {pdiss:.2f}W{sup_str}"),
+        "",
+    ]
+    for f in thermal.get("findings", []):
+        if f.get("suppressed"):
+            continue
+        sev = f.get("severity", "")
+        if normalize_severity(sev) in ("error", "warning"):
+            rule = f.get("rule_id", "")
+            title = f.get("title", "")
+            lines.append(f"- {_sev_icon(sev)} {rule}: {title}")
+    lines.append("")
+    return lines
+
+
 def _load_json(path):
     if not path or not os.path.isfile(path):
         return None
@@ -507,8 +571,23 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
         if emc_total > 0 and emc_err == 0 and emc_warn == 0:
             verified.append(f"EMC risk score {emc_score}/100 — no error/warning findings")
 
-    # Count findings AFTER all append paths so EMC/voltage-derating/protocol
-    # entries flow into has-critical / findings-count (audit F1.2).
+    if thermal:
+        # Mirror the EMC append above so thermal error/warning findings flow
+        # into has-critical / findings-count. Without this, a thermal-only
+        # error fixture rendered through the Action returns has_critical=False
+        # because the rich-Markdown thermal section at :778+ runs AFTER counts
+        # are computed below. Audit F1.2 second-site (sibling to EMC fix at
+        # commit 693b664 + the format_full_report() fix this branch).
+        thermal_summary = thermal.get("summary", {})
+        th_score_pre = thermal_summary.get("thermal_score", 0)
+        th_err_pre, th_warn_pre, _th_total_pre = _summary_counts(thermal_summary)
+        if th_err_pre > 0:
+            findings.append(("critical", f"Thermal: {th_err_pre} error-severity finding(s) — score {th_score_pre}/100", "thermal"))
+        if th_warn_pre > 0:
+            findings.append(("warning", f"Thermal: {th_warn_pre} warning-severity finding(s)", "thermal"))
+
+    # Count findings AFTER all append paths so EMC/thermal/voltage-derating/
+    # protocol entries flow into has-critical / findings-count (audit F1.2).
     critical_count = sum(1 for s, _, _ in findings if s == "critical")
     warning_count = sum(1 for s, _, _ in findings if s == "warning")
 
@@ -737,17 +816,11 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
     # === EMC (one-liner summary + error-severity findings) ===
     if emc:
         emc_s = emc.get("summary", {})
-        emc_score = emc_s.get("emc_risk_score", 0)
-        # v1.4 EMC: by_severity + total_findings. Legacy fallback for cached
-        # v1.3.1 envelopes via _summary_counts().
-        emc_crit, emc_high, emc_total = _summary_counts(emc_s)
 
         L.append("### EMC")
         L.append("")
-        emc_suppressed = emc_s.get("suppressed", 0)
-        sup_str = f", {emc_suppressed} suppressed" if emc_suppressed else ""
-        L.append(f"Risk score **{emc_score}/100** — {emc_total} checks: "
-                 f"{emc_crit} error, {emc_high} warning{sup_str}")
+        # Shared one-liner — keeps compact + full report paths in lockstep.
+        L.append(_emc_one_liner(emc_s, include_suppressed=True))
 
         for f in emc.get("findings", []):
             if f.get("suppressed"):
@@ -762,34 +835,12 @@ def format_report(schematic_path, pcb_path, spice_path, emc_path,
         L.append("")
 
     # === Thermal Analysis ===
+    # Shared helper — keeps compact + full report paths in lockstep.
+    L.extend(_render_thermal_block(thermal, heading_level=3))
     if thermal:
         ts = thermal.get("summary", {})
         th_score = ts.get("thermal_score", 0)
-        # v1.4 thermal emits summary.by_severity + total_findings (was legacy
-        # critical/high + total_checks). _summary_counts() handles both.
         th_err, th_warn, th_total = _summary_counts(ts)
-        th_pdiss = ts.get("total_board_dissipation_w", 0)
-
-        if th_total > 0:
-            L.append("### Thermal Analysis")
-            L.append("")
-            th_suppressed = ts.get("suppressed", 0)
-            th_sup_str = f", {th_suppressed} suppressed" if th_suppressed else ""
-            L.append(f"Score **{th_score}/100** — {th_total} checks, "
-                     f"total dissipation {th_pdiss:.2f}W{th_sup_str}")
-
-            for f in thermal.get("findings", []):
-                if f.get("suppressed"):
-                    continue
-                sev = f.get("severity", "")
-                # Thermal: surface error + warning (legacy CRITICAL/HIGH/MEDIUM
-                # all normalize into these v1.4 buckets).
-                if normalize_severity(sev) in ("error", "warning"):
-                    rule = f.get("rule_id", "")
-                    title = f.get("title", "")
-                    L.append(f"- {_sev_icon(sev)} {rule}: {title}")
-            L.append("")
-
         if th_err == 0 and th_warn == 0 and th_total > 0:
             verified.append(f"Thermal score {th_score}/100 — no error/warning findings")
 
@@ -1066,36 +1117,37 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path,
                     a(f"| {r.get('subcircuit_type','')} | {comps} | {r.get('status','')} |")
                 a("")
 
-        # EMC
-        if emc:
-            emc_s = emc.get("summary", {})
-            a("### EMC Pre-Compliance")
+    # EMC Pre-Compliance — top-level section so it renders for emc-only
+    # invocations too (sibling to Power Analysis / Thermal Analysis below,
+    # not nested under "if sig:" Signal Analysis Review).
+    if emc:
+        emc_s = emc.get("summary", {})
+        a("## EMC Pre-Compliance")
+        a("")
+        # Shared one-liner — keeps compact + full report paths in lockstep
+        # (rc.2 carry-over #22). Full report omits the suppressed inline
+        # count historically — preserved here for output-byte compatibility.
+        a(_emc_one_liner(emc_s, include_suppressed=False))
+        a("")
+        emc_findings = emc.get("findings", [])
+        actionable = [f for f in emc_findings
+                      if normalize_severity(f.get("severity")) in ("error", "warning")]
+        if actionable:
+            a("| Severity | Rule | Finding |")
+            a("|----------|------|---------|")
+            for f in actionable[:15]:
+                a(f"| {f.get('severity','')} | {f.get('rule_id','')} | {f.get('title','')} |")
             a("")
-            a(f"Risk score **{emc_s.get('emc_risk_score', 0)}/100** — "
-              f"{emc_s.get('total_checks', 0)} checks: "
-              f"{emc_s.get('critical', 0)} critical, "
-              f"{emc_s.get('high', 0)} high, "
-              f"{emc_s.get('medium', 0)} medium")
-            a("")
-            emc_findings = emc.get("findings", [])
-            actionable = [f for f in emc_findings
-                          if normalize_severity(f.get("severity")) in ("error", "warning")]
-            if actionable:
-                a("| Severity | Rule | Finding |")
-                a("|----------|------|---------|")
-                for f in actionable[:15]:
-                    a(f"| {f.get('severity','')} | {f.get('rule_id','')} | {f.get('title','')} |")
-                a("")
 
-            # Test plan highlights
-            tp = emc.get("test_plan", {})
-            bands = tp.get("frequency_bands", [])
-            high_risk = [b for b in bands if b.get("risk_level") in ("high", "medium") and b.get("source_count", 0) > 0]
-            if high_risk:
-                a("**Pre-compliance focus bands:**")
-                for b in high_risk[:3]:
-                    a(f"- {b['band']}: {b['source_count']} emission source(s) ({b['risk_level']} risk)")
-                a("")
+        # Test plan highlights
+        tp = emc.get("test_plan", {})
+        bands = tp.get("frequency_bands", [])
+        high_risk = [b for b in bands if b.get("risk_level") in ("high", "medium") and b.get("source_count", 0) > 0]
+        if high_risk:
+            a("**Pre-compliance focus bands:**")
+            for b in high_risk[:3]:
+                a(f"- {b['band']}: {b['source_count']} emission source(s) ({b['risk_level']} risk)")
+            a("")
 
     # === Power Analysis ===
     has_power = False
@@ -1293,31 +1345,9 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path,
             a("")
 
     # === Thermal Analysis ===
-    if thermal:
-        ts = thermal.get("summary", {})
-        th_score = ts.get("thermal_score", 0)
-        # v1.4 thermal: total_findings (was legacy total_checks). _summary_counts()
-        # is overkill here since we only need the total; inline the fallback.
-        th_total = ts.get("total_findings", ts.get("total_checks", 0))
-        th_pdiss = ts.get("total_board_dissipation_w", 0)
-        th_suppressed = ts.get("suppressed", 0)
-
-        if th_total > 0:
-            a("### Thermal Analysis")
-            a("")
-            th_sup_str = f", {th_suppressed} suppressed" if th_suppressed else ""
-            a(f"Score **{th_score}/100** — {th_total} checks, "
-              f"total dissipation {th_pdiss:.2f}W{th_sup_str}")
-            a("")
-            for f in thermal.get("findings", []):
-                if f.get("suppressed"):
-                    continue
-                sev = f.get("severity", "")
-                if normalize_severity(sev) in ("error", "warning"):
-                    rule = f.get("rule_id", "")
-                    title = f.get("title", "")
-                    a(f"- {_sev_icon(sev)} {rule}: {title}")
-            a("")
+    # Shared helper — keeps compact + full report paths in lockstep
+    # (rc.2 carry-over #22).
+    L.extend(_render_thermal_block(thermal, heading_level=2))
 
     a("---")
     a("*Generated by [kicad-happy](https://github.com/aklofas/kicad-happy)*")

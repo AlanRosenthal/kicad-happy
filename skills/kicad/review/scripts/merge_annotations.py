@@ -8,6 +8,10 @@ Failure semantics: orphan annotations and invariant violations are LOGGED
 in the merge report and the offending annotations are SKIPPED. The merge
 itself never fails on these — analyzer outputs always advance. Schema
 validation errors are hard-fail (caller's responsibility).
+
+Schema validation uses the stdlib-only mini-validator at
+`_mini_jsonschema.py` (kept narrow to the keyword subset Layer 2 needs).
+No third-party `jsonschema` dependency. Audit C2 — see CHANGELOG.
 """
 from __future__ import annotations
 
@@ -50,17 +54,18 @@ def _load_raw_envelopes(raw_dir: Path) -> dict:
 
 
 def _validate_review_schema(review: dict) -> None:
-    """Hard-fail if review_annotations doesn't match schema (HI-2 protection)."""
-    try:
-        from jsonschema import Draft202012Validator
-    except ImportError:
-        print(
-            "WARNING: jsonschema not installed; review schema validation skipped (HI-2 unverified)",
-            file=sys.stderr,
-        )
-        return
+    """Hard-fail if review_annotations doesn't match schema (HI-2 protection).
+
+    Uses the stdlib-only mini-validator at `_mini_jsonschema.py` so Layer 2
+    works without the optional `jsonschema` package. If the Layer 2 schema
+    grows beyond the mini-validator's supported keyword set, the validator
+    raises a "unsupported schema keyword" ValidationError — switch this
+    consumer back to the real jsonschema package at that point rather than
+    silently extending the mini-validator (audit C2).
+    """
+    from _mini_jsonschema import validate
     schema = json.loads(SCHEMA_PATH.read_text())
-    Draft202012Validator(schema).validate(review)
+    validate(review, schema)
 
 
 def _find_finding(envelopes: dict, finding_id: str):

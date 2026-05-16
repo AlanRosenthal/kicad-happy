@@ -23,9 +23,19 @@ def _read_capability_mode(path: Path) -> Optional[dict]:
     """Read an existing capability_mode.json, tolerating a transient
     partial read from a racing writer.
 
-    Returns the parsed record, or None if the file can't be read as valid
-    JSON after a few short retries (caller then falls through to write its
-    own — the atomic os.replace below makes the file self-heal).
+    Returns the parsed record, or None if the file can't be read as
+    valid JSON after a few short retries. Caller then falls through to
+    write its own via os.link — which will succeed (creating a fresh
+    valid record) only if the corrupt file no longer exists at write
+    time. **No self-heal under os.link first-writer-wins**: if the
+    corrupt file persists on disk, os.link raises FileExistsError, the
+    caller falls back to re-reading, and the retry loop here will keep
+    returning None on the same corrupt content. External tooling that
+    writes capability_mode.json directly (not through this module) can
+    therefore wedge the run; recovery is manual (`rm capability_mode.json`).
+    The 5-retry x 5ms sleep window is sized for the only failure mode
+    this module actually races against: the brief gap between
+    tempfile.mkstemp/fdopen and os.link in our own writer.
     """
     for _ in range(5):
         try:
@@ -100,9 +110,15 @@ def get_or_create_capability_mode(
         existing = _read_capability_mode(path)
         if existing is not None:
             return existing
-        # exists() is True but the file isn't valid JSON yet — a racing
-        # writer is mid-create. Fall through and write our own; the atomic
-        # os.replace below leaves the file in a consistent state regardless.
+        # exists() is True but the file isn't valid JSON yet — most likely
+        # a racing writer is mid-create (our own writer's mkstemp/fdopen
+        # window before os.link). Fall through and try to write our own.
+        # If we win the os.link race, the file is now our valid record.
+        # If we lose (FileExistsError), we re-read the winner's record —
+        # which will succeed if the racing writer completed, or return
+        # the original record stub if the file was externally corrupted
+        # (no self-heal under os.link first-writer-wins; see
+        # _read_capability_mode docstring for recovery).
     record = {
         "run_id": generate_run_id(),
         "datasheet_extraction": datasheet_extraction or _detect_datasheet_status(cache_dir),

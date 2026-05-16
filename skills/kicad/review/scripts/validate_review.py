@@ -44,16 +44,12 @@ def main():
             print(msg, file=sys.stderr)
         return 2
 
-    try:
-        from jsonschema import Draft202012Validator
-    except ImportError:
-        msg = "jsonschema package required for validation"
-        print(msg, file=sys.stderr)
-        return 2
+    # Stdlib-only mini-validator (audit C2). Matches jsonschema's
+    # iter_errors() surface for backward-compat with the prior consumer.
+    from _mini_jsonschema import iter_errors
 
     schema = json.loads(SCHEMA_PATH.read_text())
-    validator = Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(review),
+    errors = sorted(iter_errors(review, schema),
                      key=lambda e: list(e.path))
     error_msgs = [f"{'/'.join(str(p) for p in e.path)}: {e.message}" for e in errors]
 
