@@ -320,8 +320,29 @@ def detect_voltage_dividers(ctx: AnalysisContext) -> dict:
                         "ratio": round(ratio, 6),
                     }
 
-                    # Check if mid-point connects to a known feedback pin
-                    is_feedback = False
+                    # Check if mid-point connects to a known feedback pin.
+                    # NOTE: feedback dividers are intentionally appended to BOTH
+                    # `feedback_networks` (for regulator FB matching and feedback-
+                    # stability checks) AND `voltage_dividers` (so downstream
+                    # consumers — notably `detect_rc_filters` at :498-503 — keep
+                    # their exclusion-set correct and don't emit false-positive
+                    # RC filters pairing feedback resistors with decoupling caps;
+                    # `detect_power_regulators` at :1863 and `postfilter_vd_and_dedup`
+                    # also consume `voltage_dividers` as a shared input).
+                    #
+                    # The 8c36212 polish-pass dedup that removed this double-
+                    # emission caused 1742 VD-DET disappearances AND 502 cascade
+                    # false-positive RC-DET findings corpus-wide. Restored
+                    # 2026-05-15.
+                    #
+                    # If you're reading this thinking "the double-emission looks
+                    # like a bug, let me clean it up": don't. The Layer 1 gate
+                    # (regression/run_v14_gate.py in the harness) treats loss of
+                    # v1.3.1-emitted findings as "disappeared" under
+                    # `--only-deterministic`, so any dedup of this list must
+                    # either preserve the double-emission OR be compensated
+                    # upstream in NEW_V14_RULES at the gate side. Coordinate
+                    # with the harness before changing this.
                     if mid_net in ctx.nets:
                         mid_pins = [p for p in ctx.nets[mid_net]["pins"]
                                     if p["component"] != r_top_ref
@@ -348,13 +369,7 @@ def detect_voltage_dividers(ctx: AnalysisContext) -> dict:
                                     divider["report_context"] = {"section": "Voltage Dividers", "impact": "", "standard_ref": ""}
                                     divider["provenance"] = make_provenance("vd_two_resistor", "deterministic", [r_top_ref, r_bot_ref])
                                     feedback_networks.append(divider)
-                                    is_feedback = True
                                     break
-
-                    # Feedback dividers belong to feedback_networks only — don't double-emit
-                    # into voltage_dividers (the findings flattener picks up both lists).
-                    if is_feedback:
-                        continue
 
                     # Classify divider purpose from connected pin names
                     divider["purpose"] = _classify_divider_purpose(divider)
