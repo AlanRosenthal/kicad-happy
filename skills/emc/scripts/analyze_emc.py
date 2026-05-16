@@ -310,8 +310,10 @@ def format_text_report(result: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(
         description='EMC pre-compliance risk analyzer for KiCad designs')
-    parser.add_argument('--schematic', '-s', help='Schematic analyzer JSON')
-    parser.add_argument('--pcb', '-p', help='PCB analyzer JSON')
+    parser.add_argument('--schematic', '-s',
+                        help='Schematic analyzer JSON. Auto-resolved from --analysis-dir current run when omitted.')
+    parser.add_argument('--pcb', '-p',
+                        help='PCB analyzer JSON. Auto-resolved from --analysis-dir current run when omitted.')
     parser.add_argument('--output', '-o', help='Output JSON file path')
     parser.add_argument('--severity', default='all',
                         choices=['all', 'low', 'medium', 'high', 'critical'],
@@ -350,8 +352,24 @@ def main():
     if args.schema:
         emit_schema(EMCEnvelope)
 
+    if args.analysis_dir and (not args.schematic or not args.pcb):
+        from analysis_cache import get_current_run
+        from pathlib import Path as _AutoPath
+        _current = get_current_run(args.analysis_dir)
+        if _current is not None:
+            _run_dir, _ = _current
+            if not args.schematic:
+                _sch = _AutoPath(_run_dir) / "schematic.json"
+                if _sch.is_file():
+                    args.schematic = str(_sch)
+            if not args.pcb:
+                _pcb = _AutoPath(_run_dir) / "pcb.json"
+                if _pcb.is_file():
+                    args.pcb = str(_pcb)
+
     if not args.schematic and not args.pcb:
-        parser.error('At least one of --schematic or --pcb is required')
+        parser.error('At least one of --schematic or --pcb is required '
+                     '(or pass --analysis-dir with a current run containing schematic.json or pcb.json)')
 
     # Load inputs
     schematic = None

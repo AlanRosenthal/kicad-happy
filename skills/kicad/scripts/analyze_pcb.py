@@ -1199,6 +1199,11 @@ def _extract_keepout_zones(zones: list[dict],
             'restrictions': z.get('keepout', {}),
             'bounding_box': bbox,
             'area_mm2': z.get('outline_area_mm2', 0),
+            # Net the keepout is associated with — items on this net are
+            # ALLOWED inside the keepout (KiCad rule-area semantic). 0 / ""
+            # means "no specific net" → keepout applies to all items.
+            'net': z.get('net', 0),
+            'net_name': z.get('net_name', ''),
         }
         # Find footprints near this keepout zone
         if bbox and len(bbox) == 4:
@@ -3400,6 +3405,42 @@ def _is_rf_module(fp: dict) -> bool:
     return False
 
 
+# Edge-mount footprint categories: by-design at the board edge — PM-002 edge
+# clearance should demote to info (not warning/error) for these. rc.2 4.1
+# expansion (SparkFun review).
+_EDGE_MOUNT_LIBRARY_KEYWORDS = (
+    'SMA_Edge',                           # edge-launch SMA antenna connectors
+    'USB_C_Receptacle',                   # vertical/board-edge USB-C
+    'USB_Mini', 'USB_Micro',              # board-edge USB Mini/Micro
+    'USB_A_Vertical', 'USB_B_Vertical',
+    'MagJack',                            # RJ45 with integrated mag — by-edge
+    'microSD', 'SD_Card',                 # microSD/SD card edge sockets
+    'BarrelJack',                         # DC barrel jack at edge
+    'Standoff', 'Mounting',               # mounting features near edge are intentional
+    'TerminalBlock',                      # screw terminals at board edge
+    'JST_', 'Molex_PicoBlade',            # edge-launched JST/Molex wire-to-board
+)
+_EDGE_MOUNT_VALUE_KEYWORDS = (
+    'EDGE', 'VERTICAL',                   # value-string hints
+)
+
+
+def _is_edge_mount_footprint(fp: dict) -> bool:
+    """Return True if the footprint is designed to sit at the board edge
+    (board-edge connector, edge-launch antenna, mounting hole, etc.).
+    PM-002 demotes edge-clearance findings to info for these.
+    """
+    library = fp.get('library', '') or fp.get('footprint', '') or ''
+    value = fp.get('value', '') or ''
+    for kw in _EDGE_MOUNT_LIBRARY_KEYWORDS:
+        if kw.lower() in library.lower():
+            return True
+    for kw in _EDGE_MOUNT_VALUE_KEYWORDS:
+        if kw in value.upper():
+            return True
+    return False
+
+
 def analyze_placement(footprints: list[dict], outline: dict) -> dict:
     """Component placement analysis — courtyard overlaps and edge clearance.
 
@@ -3454,7 +3495,7 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                     "confidence": "deterministic",
                     "evidence_source": "topology",
                     "summary": f"Courtyard overlap between {fp_a['reference']} and {fp_b['reference']} ({overlap_mm2}mm\u00b2){rf_note}",
-                    "description": f"Components {fp_a['reference']} and {fp_b['reference']} have overlapping courtyards on {fp_a['layer']} ({overlap_mm2}mm\u00b2 overlap area).",
+                    "description": f"Components {fp_a['reference']} and {fp_b['reference']} have overlapping courtyards on {fp_a['layer']} ({overlap_mm2}mm\u00b2 overlap area). Threshold: \u22651.0mm\u00b2 = error, else warning; RF-module overlaps demote to info (courtyard encodes RF keepout).",
                     "components": [fp_a["reference"], fp_b["reference"]],
                     "nets": [],
                     "pins": [],
@@ -3495,12 +3536,19 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                 clearance = round(min_edge, 2)
                 # RF module footprints deliberately put the courtyard past the
                 # board edge to expose the antenna to free space (WROOM-1 etc.).
-                # Downgrade the edge-clearance finding to info with a note.
+                # Edge-mount footprints (SMA_Edge, USB_C vertical, MagJack,
+                # microSD, BarrelJack, mounting holes, etc.) belong at the
+                # board edge by design. Both demote the edge-clearance finding
+                # to info with a hint.
                 is_rf = _is_rf_module(fp)
+                is_edge_mount = _is_edge_mount_footprint(fp)
                 if is_rf:
                     severity = 'info'
                     rf_suffix = (' (RF module antenna at board edge — '
                                  'verify antenna clearance, not a body collision)')
+                elif is_edge_mount:
+                    severity = 'info'
+                    rf_suffix = (' (edge-mount footprint — by-design at board edge)')
                 elif clearance < 0.5:
                     severity = 'error'
                     rf_suffix = ''
@@ -5893,6 +5941,12 @@ def analyze_keepout_violations(footprints: list[dict], vias: dict,
         restrictions = kz.get("restrictions", {})
         kz_name = kz.get("name", "unnamed")
         kz_layers = kz.get("layers", [])
+        # KiCad rule-area "allowed net" — items on this net are ALLOWED
+        # inside the keepout (e.g., an antenna keepout that excludes copper
+        # except the antenna's own net). 0 / "" / None means "no exemption,
+        # restrict all items". rc.2 4.1 expansion (SparkFun review).
+        kz_allowed_net_id = kz.get("net") or 0
+        kz_allowed_net_name = kz.get("net_name") or ""
 
         # Check footprints
         if restrictions.get("footprints", False):
@@ -5904,10 +5958,25 @@ def analyze_keepout_violations(footprints: list[dict], vias: dict,
                 if not any(l in kz_layers or l == "*" or "*.Cu" in kz_layers for l in [fp_layer]):
                     continue
                 if kx1 <= fx <= kx2 and ky1 <= fy <= ky2:
+                    # Net exclusion: if any pad of this footprint is on the
+                    # keepout's allowed net, the footprint is permitted here.
+                    if kz_allowed_net_name:
+                        fp_nets = fp.get("connected_nets", []) or list(
+                            (fp.get("pad_nets") or {}).values())
+                        # pad_nets values are dicts with 'net' key; connected_nets is strings
+                        fp_net_names = set()
+                        for n in fp_nets:
+                            if isinstance(n, str):
+                                fp_net_names.add(n)
+                            elif isinstance(n, dict) and n.get("net"):
+                                fp_net_names.add(n["net"])
+                        if kz_allowed_net_name in fp_net_names:
+                            continue
                     findings.append({
                         "component": ref,
                         "keepout_name": kz_name,
                         "keepout_layers": kz_layers,
+                        "keepout_allowed_net": kz_allowed_net_name,
                         "detector": "analyze_keepout_violations",
                         "rule_id": "KO-001",
                         "category": "placement",
@@ -5931,10 +6000,18 @@ def analyze_keepout_violations(footprints: list[dict], vias: dict,
                 if vx is None or vy is None:
                     continue
                 if kx1 <= vx <= kx2 and ky1 <= vy <= ky2:
+                    # Net exclusion: a via on the keepout's allowed net is
+                    # permitted (e.g., an antenna trace's tuning via inside
+                    # the antenna keepout).
+                    if kz_allowed_net_id:
+                        via_net_id = via.get("net")
+                        if via_net_id == kz_allowed_net_id:
+                            continue
                     findings.append({
                         "via_x": round(vx, 2),
                         "via_y": round(vy, 2),
                         "keepout_name": kz_name,
+                        "keepout_allowed_net": kz_allowed_net_name,
                         "detector": "analyze_keepout_violations",
                         "rule_id": "KO-001",
                         "category": "placement",

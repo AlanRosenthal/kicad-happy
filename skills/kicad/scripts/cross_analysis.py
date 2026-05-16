@@ -6,7 +6,7 @@ for checks that span the schematic-PCB boundary: connector current capacity,
 ESD coverage gaps, decoupling adequacy, and schematic/PCB cross-validation.
 
 Usage:
-    python3 cross_analysis.py --schematic sch.json --pcb pcb.json [--output cross.json]
+    python3 cross_analysis.py --schematic sch.json --pcb pcb.json [--output cross_analysis.json]
     python3 cross_analysis.py --schematic sch.json  # PCB-less mode (limited checks)
     python3 cross_analysis.py --schema               # Print output schema
 """
@@ -692,9 +692,14 @@ def check_plane_splits(schematic, pcb):
             description=f'{plane_net} plane has {graph["islands"]} disconnected islands.{desc_signals}',
             severity=severity, confidence='deterministic', evidence_source='topology',
             nets=[plane_net] + crossing_signals_rpc[:5],
-            recommendation='Bridge the plane gap with copper pour or stitching vias.',
+            recommendation=(
+                'Bridge the plane gap with copper pour or stitching vias. '
+                'If zones were modified after the last fill, run KiCad '
+                'Edit → Fill All Zones (B) and re-run the analyzer first — '
+                'stale zone fills are a common cause of apparent plane splits.'
+            ),
             impact='Return path discontinuity increases EMI',
-        
+
             source=ANALYZER_SOURCE,))
     return findings
 
@@ -919,8 +924,10 @@ def run_all_checks(schematic: dict, pcb: dict | None) -> list[dict]:
 def main():
     parser = argparse.ArgumentParser(
         description='Cross-domain analysis — schematic + PCB combined checks')
-    parser.add_argument('--schematic', '-s', default=None, help='Schematic analyzer JSON')
-    parser.add_argument('--pcb', '-p', default=None, help='PCB analyzer JSON (optional)')
+    parser.add_argument('--schematic', '-s', default=None,
+                        help='Schematic analyzer JSON. Auto-resolved from --analysis-dir current run when omitted.')
+    parser.add_argument('--pcb', '-p', default=None,
+                        help='PCB analyzer JSON (optional). Auto-resolved from --analysis-dir current run when omitted.')
     parser.add_argument('--output', '-o', default=None, help='Output JSON file path')
     parser.add_argument('--schema', action='store_true', help='Print output schema and exit')
     parser.add_argument('--text', action='store_true', help='Print human-readable text report')
@@ -940,8 +947,23 @@ def main():
     if args.schema:
         emit_schema(CrossAnalysisEnvelope)
 
+    if args.analysis_dir and (not args.schematic or not args.pcb):
+        from analysis_cache import get_current_run
+        from pathlib import Path as _AutoPath
+        _current = get_current_run(args.analysis_dir)
+        if _current is not None:
+            _run_dir, _ = _current
+            if not args.schematic:
+                _sch = _AutoPath(_run_dir) / "schematic.json"
+                if _sch.is_file():
+                    args.schematic = str(_sch)
+            if not args.pcb:
+                _pcb = _AutoPath(_run_dir) / "pcb.json"
+                if _pcb.is_file():
+                    args.pcb = str(_pcb)
+
     if not args.schematic:
-        parser.error('--schematic is required')
+        parser.error('--schematic is required (or pass --analysis-dir with a current run containing schematic.json)')
 
     t0 = time.time()
 

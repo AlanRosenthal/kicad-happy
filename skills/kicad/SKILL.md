@@ -36,7 +36,7 @@ description: >-
 
 **Before analysis:** When the user asks to analyze or review a KiCad project, check whether a `datasheets/` directory exists in the project. If not, and DigiKey API keys are available (`DIGIKEY_CLIENT_ID`), offer to sync datasheets first: "I can download datasheets for your components before analysis — this enables pin-level verification and decoupling validation against manufacturer specs. Want me to sync them?" If the user declines or no API keys are set, proceed without datasheets — the analysis works without them but datasheet verification findings won't be available.
 
-**If you see a `DS-001` finding in the analyzer output** (severity `high`, detector `audit_datasheet_coverage`), the review cannot make any verified claim. Stop and either (a) run the datasheet sync via `digikey` / `mouser` / `lcsc` / `element14` (whichever has credentials/stock), (b) populate MPNs on the BOM parts, or (c) state explicitly in the report that every pin-level, electrical, and regulator finding is *consistency only* — do not use the words "verified", "confirmed", or "per datasheet" anywhere. `DS-002` (datasheets missing but MPNs set) and `DS-003` (partial MPN coverage) are softer variants with the same implication for the parts they cite.
+**If you see a `DS-001` finding in the analyzer output** (severity `high`, detector `audit_datasheet_coverage`), no analyzer-derived claim about an *unverified part* can be reported as verified. Stop and either (a) run the datasheet sync via `digikey` / `mouser` / `lcsc` / `element14` (whichever has credentials/stock), (b) populate MPNs on the BOM parts, or (c) state explicitly in the report that every pin-level, electrical, and regulator finding *for parts without datasheet evidence* is *consistency only*. **Trust-language guard is per-part, not per-report.** Claims about specific parts you manually verified against a PDF datasheet — cite the page/section/figure number — remain valid even when DS-001 is open for other parts. Words like "verified", "confirmed", or "per datasheet" are appropriate for parts with explicit citation evidence, and inappropriate for parts where the analyzer ran without datasheet input. `DS-002` (datasheets missing but MPNs set) and `DS-003` (partial MPN coverage) are softer variants with the same per-part implication.
 
 ## Design Review Contract
 
@@ -125,9 +125,16 @@ output by hand:
 | Detected circuits | Every pattern-matched circuit (power regulators, RC filters, crystal oscillators, bridges, …) lives in `findings[]` — filter with `finding_schema.get_findings(data, Det.POWER_REGULATORS)` etc. **Do not read from `subcircuits[]`**: that's an IC-neighborhood grouping (`{center_ic, ic_value, neighbor_components, …}`), not a categorized detection index | Looking for `subcircuits.power_regulators`, `subcircuits.rc_filters`, or any `subcircuits[type]` key — these never existed in v1.3 output |
 | Zone net | `pcb.zones[].net` is an **integer net ID**, not a string. Use `f"{net!r}"` or convert first | `f"{net:20s}"` — crashes with `ValueError: Unknown format code 's' for object of type 'int'` |
 | Footprint position | `pcb.footprints[].x / .y` at top level (no `.position` wrapper) | `footprints[].position.x` |
+| Per-pad net info on a footprint | `pcb.footprints[].pad_nets{pad_number: {net, pin}}` is a dict keyed by pad number. The raw per-pad geometry list is stripped from the output (it's parser-internal) — `connected_nets[]` gives the deduped list of nets touching the footprint. | `footprints[].pads[]` — that key does not exist in the output |
+| Tracks summary | `pcb.tracks` is a **dict** (the `Tracks` envelope): `{segment_count, arc_count, layer_distribution{}, width_distribution{}}`. Only `--full` populates the inner `tracks.segments[]` and `tracks.arcs[]` arrays. | `for t in tracks: ...` without `--full` — `tracks` is the summary dict, not a list |
+| Zone layer | `pcb.zones[].layers` (plural) is the canonical layer list. `zones[].layer` (singular) is reserved/None on multi-layer zones — always read `.layers`. | Reading `zones[].layer` and getting `None` |
+| Power net routing | `pcb.power_net_routing` is a **list** of per-net entries `[{net, track_count, total_length_mm, ...}, ...]`, not a dict keyed by net. | `power_net_routing["VCC"]` → TypeError |
+| IC pin analysis | `schematic.ic_pin_analysis` is a **list** of IC entries (each with `.reference` and `.pins[]`), not a dict keyed by ref. | `ic_pin_analysis["U1"]` → TypeError |
 | Findings | `findings[]` flat list — each has `rule_id`, `detector`, `severity`, `summary`, `report_context`. Filter with `finding_schema.get_findings(data, Det.*)` or `group_findings(data)` | Looking for keyed dicts like `signal_analysis.power_regulators[]` (pre-v1.3 format, removed) |
 
 This prevents format-string bugs and wrong field names. Use f-strings or `json.dumps()` for output formatting — never `%s` with non-string types. See `references/output-schema.md` for the full schema with common extraction patterns.
+
+**For a top-N rollup across every analyzer in a run** — without walking individual JSONs — use `summarize_findings.py analysis/`. Text output by default, `--json` for machine-readable, `--severity high` to gate on blockers. Full reference under [Findings Summary](#findings-summary) below.
 
 In all commands below, `<skill-path>` refers to this skill's base directory (shown at the top of this file when loaded).
 
@@ -217,12 +224,18 @@ All PCB analysis sections now produce findings with the rich format (detector, r
 ### Cross-Domain Analysis
 
 After running both schematic and PCB analyzers, run the cross-domain analyzer.
-Point `--schematic` and `--pcb` at the current run's JSON files and pass
-`--analysis-dir analysis/` so the result lands inside the same run folder
-and the manifest tracks it:
+Pass `--analysis-dir analysis/` and the script will auto-resolve `schematic.json`
+and `pcb.json` from the manifest's current run; output lands in the same folder
+and the manifest tracks it. `cross_analysis.py`, `analyze_thermal.py`, and
+`analyze_emc.py` all support this — pass `--analysis-dir` and the explicit
+`-s` / `-p` paths become optional.
 
 ```
-# Recommended: integrate into the current run
+# Recommended: auto-resolve inputs from the current run
+python3 <skill-path>/scripts/cross_analysis.py --analysis-dir analysis/
+
+# Equivalent — explicit paths still accepted (and required if you want to
+# point at a non-current run or override one input)
 python3 <skill-path>/scripts/cross_analysis.py \
     --schematic analysis/<run_id>/schematic.json \
     --pcb analysis/<run_id>/pcb.json \
@@ -230,7 +243,7 @@ python3 <skill-path>/scripts/cross_analysis.py \
 
 # One-off (bypasses the cache)
 python3 <skill-path>/scripts/cross_analysis.py \
-    --schematic schematic.json --pcb pcb.json --output cross.json
+    --schematic schematic.json --pcb pcb.json --output cross_analysis.json
 ```
 
 Checks: CC-001 connector current capacity, EG-001 ESD protection gaps, DA-001 decoupling adequacy, XV-001..003 schematic/PCB sync. PCB JSON optional.
@@ -644,12 +657,13 @@ All schematic rule findings appear in `findings[]`. The following rule IDs are p
 | SS-003 | `audit_sourcing_gate` | MPN coverage 80–100% | info |
 | NT-001 | `analyze_connectivity` | Single-pin net: signal pin | warning |
 | NT-001 | `analyze_connectivity` | Single-pin net: power_out or passive pin | info |
-| RS-001 | `audit_rail_sources` | Rail has a declared source (direct, PWR_FLAG, or bridged jumper) | info or warning |
+| RS-001 | `audit_rail_sources` | Rail has no declared source (no power_out pin, no PWR_FLAG, no bridged-jumper or regulator output) | warning |
 | RS-002 | `audit_rail_sources` | Rail depends on user closing an open jumper | high |
+| RS-003 | `audit_rail_sources` | Rail sourced indirectly via a bridged-by-default solder jumper or ferrite — functional but consider adding PWR_FLAG | info |
 | LB-001 | `detect_label_aliases` | Net has >= 2 distinct global/hierarchical labels (power nets excluded) | info |
 | PP-001 | `audit_power_pin_dc_paths` | IC power_in pin reaches a rail only through a capacitor (2-hop BFS) | high |
 
-SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 severity varies by confidence level in the detected source. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin.
+SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 is reserved for the "no source at all" case (warning); the softer "sourced via bridged jumper / ferrite" case has its own rule_id RS-003 (info) so reviewers and CI gates can filter the two independently. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin. PP-001 demotes to `info` on module-internal LDO rails (`VDDPLL_*`, `VDDA_INT_*`, `VDDCORE_*`, `VCAP`, `VDDREG`) where decoupling-only is the correct topology.
 
 ## Layer 2 LLM Review (v1.4, optional)
 
@@ -790,6 +804,15 @@ The narrative matters most for probes that investigate *why* something looks wro
 - When a finding field can be a list of strings OR a list of dicts (rare but happens in legacy-shape sections), handle both: `r = c if isinstance(c, str) else c.get("reference", "")`.
 - Pads/components with missing data: `pad.get("abs_x")` can be `None`; guard before arithmetic.
 
+**Probing raw KiCad files (not the analyzer JSON) — use `sexp_parser.py`, not regex.** When you need to inspect a `.kicad_sch` / `.kicad_pcb` / `.kicad_sym` / `.kicad_mod` directly (verifying analyzer output, spot-checking a symbol's pin block, confirming a footprint's pad numbering against the raw file), use `scripts.sexp_parser`. Regex over S-expression text loses on nested forms, escaped strings, and (sub-)quoted tokens — and it silently produces plausible-looking wrong matches. The parser produces nested Python lists/strings deterministically:
+
+```python
+from scripts.sexp_parser import parse_file, find_all, find_first
+tree = parse_file("board.kicad_pcb")
+symbols = find_all(tree, "footprint")  # every (footprint ...) form
+ref = find_first(symbols[0], "fp_text")  # nested form lookup
+```
+
 Small investment, much lower friction.
 
 ### Quick Review Checklists
@@ -802,7 +825,70 @@ Small investment, much lower friction.
 
 ### Report Generation
 
-When producing a design review report, read `references/report-generation.md` for the standard report template, severity definitions, writing principles, and domain-specific focus areas. The report format covers: overview, component summary, power tree, analyzer verification (spot-checks), signal/power/design analysis review, quality & manufacturing, prioritized issues table, positive findings, and known analyzer gaps. Always cross-reference analyzer output against the raw schematic before reporting findings.
+When producing a design review report, read `references/report-generation.md` for the standard report template, severity definitions, writing principles, and domain-specific focus areas. Always cross-reference analyzer output against the raw schematic before reporting findings.
+
+**Inline skeleton** (the section bones — fill each with analyzer-derived data and per-part datasheet citations; sections genuinely N/A get a one-line "not applicable: <reason>" rather than silent omission):
+
+```markdown
+# [Project] Design Review
+**Project:** <name> (<KiCad version>, <N sheets>, <N-layer PCB | no PCB>)
+**Date:** <YYYY-MM-DD> | **Verdict:** ready-to-fab | conditional | not-ready
+**Analyzers run:** <list>  |  **Skipped:** <list with reason>
+**Verification basis:** datasheet-verified for <N parts> | consistency-only for <N parts>
+
+## Overview
+[2–4 sentences: MCU, power architecture, key peripherals, target domain, form factor]
+
+## Previous Review Delta
+[Include when prior review/runs exist. Use `diff_analysis.py` output; summarise as added / removed / changed.]
+
+## Critical Findings (blockers)
+| # | Ref | Issue | Impact | Evidence | Action |
+
+## Component Summary
+Total / unique / DNP / missing-MPN / datasheet-synced %.
+
+## Power Tree
+[Rail-by-rail: source → regulator → load with Iload, headroom, Vref source (`lookup` vs `heuristic`).]
+
+## Analyzer Verification
+- Component count: N schematic = N PCB
+- Pin-to-net spot-check vs raw schematic + manufacturer PDFs (Table: Ref | Pins | Datasheet page/section | Status)
+- Pinout plausibility (no MPN): Table of unverifiable parts with convention-match assessment
+- Net tracing: power rails + critical signals traced end-to-end
+
+## Signal / Power / Design Analysis
+[One subsection per relevant detector group: regulators, dividers, filters, opamps, protection, transistors, crystals, current sense, decoupling, domain-specific.]
+
+## Simulation Verification
+[**Required when any SPICE simulator is installed.** Summary table grouped by status (pass/warn/fail/skip). For each: subcircuit, expected vs simulated, delta %.]
+
+## EMC Pre-compliance
+[Risk score, severity rollup, per-net top hits, regulatory coverage. From `analyze_emc.py`.]
+
+## Thermal Hotspots
+[Per-component Tj estimates, headroom vs absolute max, proximity warnings. From `analyze_thermal.py`.]
+
+## Cross-Domain Findings
+[Connector current capacity, ESD gaps, decoupling adequacy, schematic↔PCB sync. From `cross_analysis.py`.]
+
+## DFM & Manufacturing
+[Placement, via types, tombstoning risk, thermal pad vias, silkscreen, assembly checks.]
+
+## Component Lifecycle
+[Active/NRND/EOL/obsolete breakdown, single-source flags, temperature-grade coverage. Or: "Not performed — <reason>."]
+
+## False Positives / Reviewer Overrides
+[Findings reviewed and judged benign, with reasoning. Required so the reader can see what was considered rather than missed.]
+
+## Not Performed / Review Limits
+[Explicit per-analyzer "didn't run because <reason>". Datasheets missing for <list>. Verification gaps that constrain confidence.]
+
+## Positive Findings
+[What the design got right — short bullet list.]
+```
+
+This skeleton covers the canonical structure; `references/report-generation.md` has the full template, severity definitions, writing principles, domain-specific focus areas, and the per-analyzer output-field reference.
 
 ### Design Comparison
 When comparing two designs, diff: component counts/types, net classes/design rules, track widths/via sizes, board dimensions/layer count, power supply topology, KiCad version differences.

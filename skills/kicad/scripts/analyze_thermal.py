@@ -856,9 +856,11 @@ def main():
         description="Thermal hotspot estimator for KiCad designs"
     )
     parser.add_argument("--schematic", "-s",
-                        help="Schematic analyzer JSON (from analyze_schematic.py)")
+                        help="Schematic analyzer JSON (from analyze_schematic.py). "
+                             "Auto-resolved from --analysis-dir current run when omitted.")
     parser.add_argument("--pcb", "-p",
-                        help="PCB analyzer JSON (from analyze_pcb.py)")
+                        help="PCB analyzer JSON (from analyze_pcb.py). "
+                             "Auto-resolved from --analysis-dir current run when omitted.")
     parser.add_argument("--output", "-o",
                         help="Output JSON file path (default: stdout)")
     parser.add_argument("--text", action="store_true",
@@ -887,8 +889,24 @@ def main():
     if args.schema:
         emit_schema(ThermalEnvelope)
 
+    if args.analysis_dir and (not args.schematic or not args.pcb):
+        from analysis_cache import get_current_run
+        from pathlib import Path as _AutoPath
+        _current = get_current_run(args.analysis_dir)
+        if _current is not None:
+            _run_dir, _ = _current
+            if not args.schematic:
+                _sch = _AutoPath(_run_dir) / "schematic.json"
+                if _sch.is_file():
+                    args.schematic = str(_sch)
+            if not args.pcb:
+                _pcb = _AutoPath(_run_dir) / "pcb.json"
+                if _pcb.is_file():
+                    args.pcb = str(_pcb)
+
     if not args.schematic or not args.pcb:
-        parser.error("the --schematic and --pcb arguments are required (except with --schema)")
+        parser.error("the --schematic and --pcb arguments are required "
+                     "(or pass --analysis-dir with a current run containing schematic.json and pcb.json)")
 
     # Load inputs
     try:

@@ -4953,12 +4953,25 @@ def audit_datasheet_coverage(components: list[dict],
     # datasheet_extract_cache; its presence implies datasheets exist.
     import os as _os
     pd = project_dir or "."
-    candidates = [
-        _os.path.join(pd, "datasheets"),
-        _os.path.join(pd, "datasheets", "extracted"),
-        _os.path.join(pd, "docs", "datasheets"),
-        _os.path.join(_os.path.dirname(pd), "datasheets"),
-    ]
+    # rc.2 4.2: widened search — walk up 1–2 parent dirs and match the case-
+    # insensitive [Dd]atasheets?/ pattern (singular or plural). Eliminates
+    # DS-001 FPs on repos where the datasheets directory lives one level up
+    # (multi-project monorepos, board variant subfolders, etc.).
+    _DS_DIR_NAMES = (
+        "datasheets", "Datasheets",
+        "datasheet", "Datasheet",
+    )
+    candidates: list[str] = []
+    _bases = [pd, _os.path.dirname(pd) or pd]
+    _grand = _os.path.dirname(_bases[1]) if _bases[1] else pd
+    if _grand and _grand != _bases[1]:
+        _bases.append(_grand)
+    for _base in _bases:
+        for _name in _DS_DIR_NAMES:
+            candidates.append(_os.path.join(_base, _name))
+            candidates.append(_os.path.join(_base, _name, "extracted"))
+        candidates.append(_os.path.join(_base, "docs", "datasheets"))
+        candidates.append(_os.path.join(_base, "documentation", "datasheets"))
     ds_dir_found = next(
         (c for c in candidates if _os.path.isdir(c)), None)
     ds_file_count = 0
@@ -9346,7 +9359,20 @@ def main():
     except (ImportError, Exception):
         pass
 
-    if args.lifecycle:
+    # rc.2 4.3 — LC-007 lifecycle-skipped INFO finding. Emit explicitly so
+    # reviewers see "lifecycle audit not run" in the findings list rather
+    # than silently missing it. Fires in three cases:
+    #   1. --lifecycle flag was not passed (most common — high frequency)
+    #   2. --lifecycle passed but no MPNs in BOM
+    #   3. --lifecycle passed but the audit raised an exception
+    _lifecycle_skip_reason: str | None = None
+    if not args.lifecycle:
+        _lifecycle_skip_reason = (
+            "--lifecycle flag not passed (run with --lifecycle to query "
+            "DigiKey / Mouser / LCSC / element14 for obsolescence + "
+            "operating-temp coverage; requires network + API keys)"
+        )
+    else:
         try:
             from lifecycle_audit import audit_bom
             project_dir = str(Path(args.schematic).parent)
@@ -9355,11 +9381,53 @@ def main():
                 result["lifecycle_audit"] = lifecycle
                 print(f"Lifecycle: {lifecycle.get('lifecycle_summary', {})}", file=sys.stderr)
             else:
+                _lifecycle_skip_reason = (
+                    "no components with MPNs to check — populate MPN "
+                    "fields on BOM parts and re-run with --lifecycle"
+                )
                 print("Lifecycle: no components with MPNs to check", file=sys.stderr)
         except ImportError:
+            _lifecycle_skip_reason = "lifecycle_audit.py not found"
             print("Warning: lifecycle_audit.py not found", file=sys.stderr)
         except (OSError, ValueError, TypeError, KeyError) as e:
+            _lifecycle_skip_reason = f"audit raised {type(e).__name__}: {e}"
             print(f"Warning: lifecycle audit failed: {e}", file=sys.stderr)
+
+    if _lifecycle_skip_reason is not None:
+        if 'findings' not in result:
+            result['findings'] = []
+        result['findings'].append({
+            "detector": "audit_lifecycle_skipped",
+            "rule_id": "LC-007",
+            "severity": "info",
+            "confidence": "deterministic",
+            "evidence_source": "topology",
+            "category": "lifecycle",
+            "summary": f"Lifecycle audit not run — {_lifecycle_skip_reason.split(' (')[0]}",
+            "description": (
+                f"Component lifecycle / obsolescence audit was not run "
+                f"this session. Reason: {_lifecycle_skip_reason}. The "
+                f"review cannot report active / NRND / EOL / obsolete "
+                f"status, last-time-buy windows, or operating-temperature "
+                f"coverage for any BOM part. Treat the lifecycle section "
+                f"of the report as 'not performed'."
+            ),
+            "components": [],
+            "nets": [],
+            "pins": [],
+            "recommendation": (
+                "Run with --lifecycle (requires DIGIKEY_CLIENT_ID / "
+                "MOUSER_SEARCH_API_KEY / ELEMENT14_API_KEY env vars; "
+                "LCSC needs no auth) to populate this section. If "
+                "intentionally skipped, note it explicitly in the report's "
+                "'Not Performed' section."
+            ),
+            "report_context": {
+                "section": "Component Lifecycle",
+                "impact": "No obsolescence / temperature-grade evidence available.",
+                "standard_ref": "",
+            },
+        })
 
     # Datasheet verification — cross-check extracted datasheet data against schematic
     try:

@@ -64,6 +64,65 @@ def _find_pullups_on_net(
     return pullups
 
 
+# Library / footprint substrings that identify a bridged-by-default solder
+# jumper. SolderJumper_2_Bridged (Jumper library) is the canonical KiCad
+# symbol; the footprint name carries _Bridged_ too. rc.2 4.1 expansion
+# (SparkFun review — JP1/JP14/JP22 FP class on I2C buses behind bridged
+# jumpers).
+_BRIDGED_JUMPER_LIB_SUBSTRINGS = (
+    'solderjumper_2_bridged',
+    'solderjumper-2_p1.3mm_bridged',  # standard footprint suffix
+)
+
+
+def _bridged_jumper_neighbor_nets(ctx: AnalysisContext, net_name: str) -> list[str]:
+    """Return nets reachable from `net_name` via one hop through a
+    SolderJumper_2_Bridged. Used to extend pull-up search across
+    bridged-by-default jumpers (PR-001 I2C check).
+    """
+    if not net_name:
+        return []
+    neighbors: list[str] = []
+    seen: set[str] = set()
+    for comp in ctx.components:
+        lib = (comp.get('lib_id', '') + ' ' + comp.get('footprint', '')).lower()
+        if not any(s in lib for s in _BRIDGED_JUMPER_LIB_SUBSTRINGS):
+            continue
+        ref = comp.get('reference')
+        if not ref:
+            continue
+        # Two-pin jumper; collect nets on its pins
+        jumper_nets = set()
+        for pnum, (net, _) in (ctx.ref_pins.get(ref, {}) or {}).items():
+            if net:
+                jumper_nets.add(net)
+        if net_name not in jumper_nets or len(jumper_nets) != 2:
+            continue
+        for n in jumper_nets:
+            if n != net_name and n not in seen:
+                seen.add(n)
+                neighbors.append(n)
+    return neighbors
+
+
+def _find_pullups_on_net_with_bridged(
+    ctx: AnalysisContext,
+    net_name: str,
+    resistor_nets: dict[str, tuple[str, str]],
+    net_to_resistors: dict[str, list[str]],
+) -> list[dict]:
+    """Like `_find_pullups_on_net` but also walks one hop through
+    SolderJumper_2_Bridged to find pullups attached on the bridged side
+    of the jumper. rc.2 4.1 expansion (SparkFun review).
+    """
+    pullups = list(_find_pullups_on_net(ctx, net_name, resistor_nets, net_to_resistors))
+    for neighbor in _bridged_jumper_neighbor_nets(ctx, net_name):
+        for pu in _find_pullups_on_net(ctx, neighbor, resistor_nets, net_to_resistors):
+            if pu not in pullups:
+                pullups.append(pu)
+    return pullups
+
+
 def _find_pulldowns_on_net(
     ctx: AnalysisContext,
     net_name: str,
@@ -157,6 +216,33 @@ _OPEN_DRAIN_IC_KEYWORDS = (
 # Typical pull-up value range (ohms) — flag if outside
 _PULLUP_MIN_OHMS = 1000      # 1k — below this is suspicious
 _PULLUP_MAX_OHMS = 100000    # 100k — above this is weak
+
+# Regulators with internal EN pull-up — EN can be left floating (the part
+# enables itself by default) without a discrete external pull-up. Per-part
+# prefixes from TI/MPS/Microchip; pattern-match against IC value/MPN upper-cased.
+# rc.2 4.1 expansion (SparkFun + Manas review).
+_INTERNAL_EN_PULLUP_REGULATOR_PREFIXES = (
+    'TPS54302', 'TPS5430',     # TI sync buck (D-CAP2) — internal EN pull-up
+    'TPS6213',                 # TI buck with internal soft-start + EN pull-up
+    'MCP1727',                 # Microchip LDO
+    'MP2315', 'MP2303',        # MPS sync bucks
+    'LMR33630',                # TI sync buck
+)
+_EN_PIN_PATTERN_SET = frozenset((
+    'EN', 'ENABLE', 'CE', 'SHDN', 'SHUTDOWN', 'NSHDN', 'ON', 'ONOFF', 'RUN',
+))
+
+
+def _has_internal_en_pullup(ic: dict, pin_name: str) -> bool:
+    """True when (ic, pin) matches a regulator whose datasheet says EN may
+    be left floating (internal pull-up). Used to suppress PU-001 missing-
+    pullup warnings on those parts' EN pins.
+    """
+    pin_upper = pin_name.upper().replace('-', '').replace('_', '')
+    if pin_upper not in _EN_PIN_PATTERN_SET:
+        return False
+    val_mpn = ((ic.get('mpn') or '') + ' ' + (ic.get('value') or '')).upper()
+    return any(prefix in val_mpn for prefix in _INTERNAL_EN_PULLUP_REGULATOR_PREFIXES)
 
 
 def validate_pullups(ctx: AnalysisContext) -> list[dict]:
@@ -258,6 +344,11 @@ def validate_pullups(ctx: AnalysisContext) -> list[dict]:
                     # Check if another driver exists (push-pull output driving it)
                     if _net_has_driver(ctx, net, ref):
                         continue  # Net is actively driven, pull-up not strictly required
+
+                    # Skip regulators whose EN pin has an internal pull-up
+                    # (rc.2 4.1 expansion — TI/MPS/Microchip parts list).
+                    if _has_internal_en_pullup(ic, pin_name):
+                        continue
 
                     findings.append(make_finding(
                         detector='validate_pullups',
@@ -647,7 +738,7 @@ def validate_i2c_bus(ctx: AnalysisContext) -> list[dict]:
         sda, scl = bus['sda_net'], bus['scl_net']
         refs = bus['devices']
 
-        sda_pullups = _find_pullups_on_net(ctx, sda, resistor_nets, net_to_resistors)
+        sda_pullups = _find_pullups_on_net_with_bridged(ctx, sda, resistor_nets, net_to_resistors)
         if not sda_pullups:
             findings.append(make_finding(
                 detector='validate_i2c_bus', rule_id='PR-001', category='protocol_integrity',
@@ -662,7 +753,7 @@ def validate_i2c_bus(ctx: AnalysisContext) -> list[dict]:
             
                 source=ctx.source,))
 
-        scl_pullups = _find_pullups_on_net(ctx, scl, resistor_nets, net_to_resistors)
+        scl_pullups = _find_pullups_on_net_with_bridged(ctx, scl, resistor_nets, net_to_resistors)
         if not scl_pullups:
             findings.append(make_finding(
                 detector='validate_i2c_bus', rule_id='PR-001', category='protocol_integrity',
@@ -1236,6 +1327,17 @@ _REQUIRES_COMPENSATION_KEYWORDS = (
     'uc384', 'uc282',
 )
 
+# Internally-compensated regulators — no external compensation needed.
+# Checked BEFORE _REQUIRES_COMPENSATION_KEYWORDS so wins over broad matches
+# like 'tps54' (which catches TPS54302's D-CAP2 part by accident). rc.2 4.1
+# expansion (Manas review).
+_INTERNALLY_COMPENSATED_KEYWORDS = (
+    'tps54302',                # TI D-CAP2 (already a more-specific 'tps54' match)
+    'tps62',                   # TI TPS62xxx DCS-Control family
+    'mpm3833',                 # MPS POL module
+    'ap6',                     # Diodes Inc. AP6xxx synchronous buck family
+)
+
 _FB_PIN_NAMES = ('FB', 'VFEEDBACK', 'VFB', 'ADJ', 'VADJ', 'COMP', 'VSEN')
 
 _FB_IMPEDANCE_MIN = 1000
@@ -1301,7 +1403,8 @@ def validate_feedback_stability(
                 source=ctx.source,))
 
         comp = ctx.comp_lookup.get(ref)
-        if comp and match_ic_keywords(comp, _REQUIRES_COMPENSATION_KEYWORDS):
+        if (comp and match_ic_keywords(comp, _REQUIRES_COMPENSATION_KEYWORDS)
+                and not match_ic_keywords(comp, _INTERNALLY_COMPENSATED_KEYWORDS)):
             fb_net = _get_pin_net(ctx, ref, _FB_PIN_NAMES)
             comp_net = _get_pin_net(ctx, ref, ('COMP', 'CC', 'RC'))
             check_net = comp_net or fb_net

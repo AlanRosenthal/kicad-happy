@@ -4065,10 +4065,14 @@ def audit_rail_sources(ctx: AnalysisContext,
         if bridged_sources:
             # Rail has an upstream source via a closed-by-default jumper.
             # That's functional out of the box; record it as info.
+            # rc.2 4.2 split: RS-001 now reserved for "no source at all"
+            # (warning). The "soft" case of sourcing via a bridged jumper
+            # / ferrite gets its own rule_id RS-003 (info) so reviewers
+            # and CI gates can filter the two cases independently.
             neighbours = ", ".join(f"{n} via {j}" for n, j in bridged_sources)
             findings.append({
                 "detector": "audit_rail_sources",
-                "rule_id": "RS-001",
+                "rule_id": "RS-003",
                 "severity": "info",
                 "confidence": "deterministic",
                 "evidence_source": "topology",
@@ -4078,15 +4082,18 @@ def audit_rail_sources(ctx: AnalysisContext,
                 "description": (f"Net {net_name} has no direct power_out "
                                 f"pin or PWR_FLAG, but reaches a sourced "
                                 f"net through a bridged-by-default solder "
-                                f"jumper. Functional out of the box."),
+                                f"jumper. Functional out of the box; "
+                                f"consider adding a PWR_FLAG so the rail "
+                                f"is explicit in the schematic."),
                 "components": [j for _, j in bridged_sources],
                 "nets": [net_name] + [n for n, _ in bridged_sources],
                 "pins": [],
                 "source_path": "bridged_jumper",
                 "bridged_neighbours": [n for n, _ in bridged_sources],
                 "recommendation": (
-                    "No action. If you later score the jumper, this rail "
-                    "will lose its source."),
+                    "Optional: add a PWR_FLAG on this rail to declare it "
+                    "explicitly. No functional change required — the "
+                    "bridged jumper already provides the source."),
                 "report_context": {
                     "section": "Power — Rail Sources",
                     "impact": ("Rail functions without user action; "
@@ -4250,6 +4257,31 @@ def detect_label_aliases(ctx: AnalysisContext) -> list[dict]:
 # IC power pin DC path audit (PP-001)
 # ---------------------------------------------------------------------------
 
+# Module-internal LDO rail names — these nets are fed from an internal LDO
+# inside the IC and only need external decoupling, not an external DC source.
+# Demote PP-001 from error to info for these (KSZ8041, STM32 internal regs,
+# Atmel internal cores, etc.). rc.2 4.1 expansion (SparkFun review).
+_MODULE_INTERNAL_RAIL_PATTERNS = (
+    'VDDPLL',                # PLL-domain internal rail (KSZ8041, STM32, ATmega)
+    'VDDA_INT', 'VDDAINT',   # analog-domain internal core (Atmel, NXP)
+    'VDDCORE', 'VDD_CORE',   # core-voltage internal rail (NXP LPC, Renesas)
+    'VDDIO_INT', 'VDDPHY',   # PHY/IO-domain internal (Ethernet PHYs)
+    'VCAP',                  # STM32 internal-regulator cap pin
+    'VDDREG',                # internal regulator output (decoupling only)
+)
+
+
+def _is_module_internal_rail(net_name: str) -> bool:
+    """True if the net name matches a known module-internal LDO rail pattern.
+    These nets are driven by an internal regulator and only require external
+    decoupling — they should NOT be flagged as missing-DC-source by PP-001.
+    """
+    if not net_name:
+        return False
+    base = net_name.upper().lstrip('/').lstrip('+')
+    return any(base.startswith(pat) for pat in _MODULE_INTERNAL_RAIL_PATTERNS)
+
+
 def audit_power_pin_dc_paths(ctx: AnalysisContext,
                              solder_jumpers: list[dict] | None = None
                              ) -> list[dict]:
@@ -4411,23 +4443,42 @@ def audit_power_pin_dc_paths(ctx: AnalysisContext,
             pin_label = f"{ref}.{pin_num}"
             if pin_name:
                 pin_label += f" ({pin_name})"
+            # Module-internal LDO rails (VDDPLL_*, VDDA_INT_*, VDDCORE_*, etc.)
+            # are driven by an INTERNAL regulator inside the IC — they don't
+            # need an external DC source, only decoupling. Demote to info.
+            # rc.2 4.1 expansion (SparkFun review).
+            _is_internal_rail = _is_module_internal_rail(net_name)
+            _severity = 'info' if _is_internal_rail else 'error'
+            _summary_prefix = (
+                f"IC power pin {pin_label} on internal-LDO rail "
+                f"(net {net_name!r}) — decoupling-only is correct"
+                if _is_internal_rail else
+                f"IC power pin {pin_label} has no DC path to a "
+                f"power rail (net {net_name!r})"
+            )
             findings.append({
                 "detector": "audit_power_pin_dc_paths",
                 "rule_id": "PP-001",
-                "severity": "error",
+                "severity": _severity,
                 "confidence": "heuristic",
                 "evidence_source": "topology",
                 "category": "power",
-                "summary": (f"IC power pin {pin_label} has no DC path to a "
-                            f"power rail (net {net_name!r})"),
-                "description": (f"Pin {pin_label} is type=power_in on net "
-                                f"{net_name!r}. Graph walk (≤{MAX_HOPS} "
-                                f"hops, rejecting capacitor edges, "
-                                f"accepting resistors≤1Ω, inductors, "
-                                f"ferrite beads, bridged solder jumpers) "
-                                f"did not reach a named power rail. The pin "
-                                f"is likely AC-coupled to ground only — "
-                                f"the IC will not power up reliably."),
+                "summary": _summary_prefix,
+                "description": (
+                    f"Pin {pin_label} is type=power_in on net {net_name!r} "
+                    f"which matches a module-internal LDO rail naming "
+                    f"convention. The IC supplies this rail from an "
+                    f"internal regulator; only external decoupling is "
+                    f"required. No external DC source needed."
+                    if _is_internal_rail else
+                    f"Pin {pin_label} is type=power_in on net "
+                    f"{net_name!r}. Graph walk (≤{MAX_HOPS} "
+                    f"hops, rejecting capacitor edges, "
+                    f"accepting resistors≤1Ω, inductors, "
+                    f"ferrite beads, bridged solder jumpers) "
+                    f"did not reach a named power rail. The pin "
+                    f"is likely AC-coupled to ground only — "
+                    f"the IC will not power up reliably."),
                 "components": [ref],
                 "nets": sorted(visited)[:10],
                 "pins": [pin_label],
@@ -4435,6 +4486,11 @@ def audit_power_pin_dc_paths(ctx: AnalysisContext,
                 "visited_nets": sorted(visited),
                 "source_path": "none",
                 "recommendation": (
+                    "Verify against the datasheet that this pin is an "
+                    "internal-LDO output. If so, confirm a 0.1µF (or "
+                    "datasheet-recommended) decoupling cap to GND is "
+                    "present. Otherwise, route an external DC source."
+                    if _is_internal_rail else
                     "Verify the schematic for this pin: the DC route must "
                     "go through a conducting element (direct wire, 0Ω "
                     "resistor, inductor, ferrite bead, or bridged solder "
@@ -4443,7 +4499,9 @@ def audit_power_pin_dc_paths(ctx: AnalysisContext,
                     "or 0Ω in series."),
                 "report_context": {
                     "section": "Power — DC Continuity",
-                    "impact": "IC supply floats DC; board will not run.",
+                    "impact": ("Module-internal rail — decoupling-only is correct."
+                               if _is_internal_rail else
+                               "IC supply floats DC; board will not run."),
                     "standard_ref": "",
                 },
                 "provenance": make_provenance("pp_dc_path_audit", "deterministic", [ref]),
