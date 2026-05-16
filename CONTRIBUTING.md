@@ -152,8 +152,25 @@ description: One paragraph describing what this skill does and when to use it. I
 5. Validate:
     *   **Claude Code:** `claude plugin validate .`
     *   **Gemini CLI:** Run `/skills reload` in an active session to verify discovery.
+    *   **All skills:** `python3 .github/scripts/check_skill_metadata.py` (description ≤ 1024 chars; CI runs this on every PR).
 
 Keep SKILL.md language agent-neutral — use "the agent" instead of "Claude", "use web search" instead of "WebSearch", etc.
+
+### SKILL.md description length cap
+
+Every skill's frontmatter `description:` must stay under **1024 characters** — the strictest cap shipped by any supported platform (Codex). Skills over this are rejected on load by Codex and silently truncated elsewhere. CI gates on this via `.github/scripts/check_skill_metadata.py`. To run it locally before committing:
+
+```bash
+python3 .github/scripts/check_skill_metadata.py
+```
+
+Reports current length + buffer for every skill, warns when buffer drops below 50 chars, fails when any skill is over the cap. To enable as a git pre-commit hook so it runs automatically on `git commit`:
+
+```bash
+ln -sf ../../.github/scripts/check_skill_metadata.py .git/hooks/pre-commit
+```
+
+The `bom` and `kicad` skills' descriptions are currently the closest to the cap (their trigger-phrase lists are the longest); be conservative when adding phrases there.
 
 ## Running the analysis scripts
 
