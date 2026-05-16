@@ -8783,11 +8783,20 @@ def analyze_schematic(path: str, project_root: str | None = None,
                           file=sys.stderr)
                     sym_inst = parsed.get("root_symbol_instances", {})
                     base_idx = len(parsed["sheets_parsed"])
-                    for sheet_path in extra_sheets:
+                    # Queue-based walk so peers with their own inner
+                    # (sheet ...) references — the "hybrid" Altium-flat
+                    # shape, flat top + sub-hierarchy beneath one or more
+                    # peers — get their child sheets merged in too. Pure
+                    # Altium-flat imports (no inner refs) walk this loop
+                    # exactly once per peer with no recursion. PR #19
+                    # follow-up #14 (Copilot review 3221428004).
+                    to_parse = list(extra_sheets)
+                    while to_parse:
+                        sheet_path = to_parse.pop(0)
                         try:
                             (_, comps, wires, labels, junctions,
-                             no_connects, _, lib_syms, text_annot,
-                             bus_elems, title_blk) = \
+                             no_connects, sub_sheet_paths, lib_syms,
+                             text_annot, bus_elems, title_blk) = \
                                 parse_single_sheet(
                                     sheet_path,
                                     symbol_instances=sym_inst)
@@ -8821,6 +8830,15 @@ def analyze_schematic(path: str, project_root: str | None = None,
                             elif isinstance(bv, dict):
                                 parsed["bus_elements"].setdefault(bk, {}).update(bv)
                         parsed["sheets_parsed"].append(sheet_path)
+                        # Enqueue any sub-sheet references from THIS peer
+                        # for the hybrid case. `seen` is the cycle guard:
+                        # it already has root + every peer; we add each
+                        # sub-sheet on first sighting.
+                        for sub_path, _sheet_uuid in sub_sheet_paths:
+                            abs_sub = str(Path(sub_path).resolve())
+                            if abs_sub not in seen:
+                                seen.add(abs_sub)
+                                to_parse.append(abs_sub)
                     # Power symbols were extracted from root-sheet components
                     # only; refresh from the merged list so peer-sheet ones are
                     # included.
