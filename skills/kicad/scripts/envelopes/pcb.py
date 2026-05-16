@@ -280,27 +280,17 @@ class PCBEnvelope:
         "description": "Per-net track length rollup: [{net, net_number, "
                        "total_length_mm, segment_count, via_count, "
                        "layers}]."})
-    power_net_routing: list[dict] = field(metadata={
-        "description": "Power net routing rollup: [{net, track_count, "
-                       "total_length_mm, min_width_mm, max_width_mm, "
-                       "widths_used}]."})
 
     # --- Refdes prefix groups ---
     component_groups: dict[str, ComponentGroup] = field(metadata={
         "description": "Refdes prefix -> {count, references}."})
 
     # --- Analysis bags (free-form dicts) ---
-    ground_domains: dict = field(metadata={
-        "description": "Ground topology: domain_count, domains[], "
-                       "multi_domain_components."})
     silkscreen: dict = field(metadata={
         "description": "Silkscreen rollup: board_text_count, "
                        "refs_visible_on_silk, refs_hidden_on_silk, "
                        "documentation_warnings[], fab_notes_completeness, "
                        "silkscreen_completeness."})
-    placement_density: dict = field(metadata={
-        "description": "Placement density: board_area_cm2, "
-                       "front_density_per_cm2, optional back_density_per_cm2."})
     dfm_summary: dict = field(metadata={
         "description": "DFM rollup: dfm_tier, metrics, violation_count."})
     project_settings: dict = field(metadata={
@@ -322,6 +312,20 @@ class PCBEnvelope:
         "description": "Board metadata bag (paper size, title block "
                        "fragments, etc.); empty dict when no metadata "
                        "extracted. TH-043."})
+    power_net_routing: list[dict] = field(default_factory=list, metadata={
+        "description": "Power net routing rollup: [{net, track_count, "
+                       "total_length_mm, min_width_mm, max_width_mm, "
+                       "widths_used}]; empty list when no power routing "
+                       "detected. TH-043-residual."})
+    ground_domains: dict = field(default_factory=dict, metadata={
+        "description": "Ground topology: domain_count, domains[], "
+                       "multi_domain_components. Always emitted; "
+                       "domain_count=0 is meaningful (no ground domain "
+                       "found). TH-043-residual."})
+    placement_density: dict = field(default_factory=dict, metadata={
+        "description": "Placement density: board_area_cm2, "
+                       "front_density_per_cm2, optional back_density_per_cm2; "
+                       "empty dict when density not computed. TH-043-residual."})
 
     # --- Phase 4 capability pointer ---
     capability_mode_ref: Optional[dict] = field(default=None, metadata={

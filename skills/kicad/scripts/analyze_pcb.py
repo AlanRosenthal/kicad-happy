@@ -6270,8 +6270,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
 
     if pad_distances:
         result["pad_to_pad_distances"] = pad_distances
-    if power_routing:
-        result["power_net_routing"] = power_routing
+    # TH-043-residual: always emit (schema-required); empty list when no power routing.
+    result["power_net_routing"] = power_routing if power_routing else []
     if decoupling:
         result["decoupling_placement"] = decoupling
         # Flat decoupling proximity matrix for EMC/cross-verify consumers
@@ -6294,8 +6294,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
         if loop_areas:
             result["switching_loop_areas"] = loop_areas
 
-    if ground_domains["domain_count"] > 0:
-        result["ground_domains"] = ground_domains
+    # TH-043-residual: always emit (schema-required); domain_count=0 is meaningful info.
+    result["ground_domains"] = ground_domains
     if current_capacity["power_ground_nets"] or current_capacity["narrow_signal_nets"]:
         result["current_capacity"] = current_capacity
     if thermal["zone_stitching"] or thermal["thermal_pads"]:
@@ -6437,8 +6437,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     if placement:
         findings.extend(placement.get('courtyard_overlaps', []))
         findings.extend(placement.get('edge_clearance_warnings', []))
-        if placement.get('density'):
-            result['placement_density'] = placement['density']
+    # TH-043-residual: always emit (schema-required); empty dict when placement/density missing.
+    result['placement_density'] = (placement or {}).get('density') or {}
 
     thermal_sec = result.pop('thermal_analysis', None)
     if thermal_sec:
