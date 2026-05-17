@@ -70,6 +70,23 @@ detectors, 6 new detectors, end-to-end exercise) — is in the
   `README.md` ("Works with" line + Install block + Release candidates
   section), `CONTRIBUTING.md` (skill-author checklist), and
   `github-action.md` (CI integration via `anomalyco/opencode/github`).
+- **JLCPCB BOM/CPL translator + PCBA workflow** — new
+  `skills/bom/scripts/translate_bom_pnp.py` (stdlib-only, ~280 LOC,
+  two subcommands: `bom` and `pnp`) handles KiCad and Altium-format
+  BOM/CPL inputs, with header autodetect, DNP/PCB-marker filtering,
+  multi-row alt-MPN merging, mil/inch→mm coord normalization, and
+  TopLayer/BottomLayer → T/B layer mapping. The `pnp --bom <path>`
+  filter mode drops CPL designators absent from the BOM, avoiding
+  JLCPCB's silent orphan-designator upload rejection. Documented as
+  a 3-step PCBA workflow in `skills/jlcpcb/SKILL.md`. Inspired by
+  [MattStarfield/kicad-happy](https://github.com/MattStarfield/kicad-happy)
+  fork commits `fe440c8` (translator + workflow) and `8d8d06c`
+  (`--bom` filter + consigned-parts step). Clean reimplementation
+  under upstream MIT; Matt credited as `Co-Authored-By` on each
+  commit. The JLCPCB Open Platform API integration in Matt's fork
+  is intentionally deferred — depends on an out-of-tree HMAC signing
+  client and a reference SDK without a clear license; revisit in
+  v1.5+.
 
 ### Known limitations (v1.5 candidates)
 
