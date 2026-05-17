@@ -61,6 +61,15 @@ detectors, 6 new detectors, end-to-end exercise) — is in the
   race on the canonical `capability_mode.json` record fixed via
   `os.rename` atomic rename pattern. Eliminates a rare TOCTOU window
   observed under parallel analyzer execution.
+- **opencode platform support** — ship `.opencode/opencode.json`
+  pointing opencode's skill loader at the existing `skills/` tree. All
+  12 skills auto-discover; no `AGENTS.md`, no file duplication, no
+  symlinks. Mirrors the `.claude-plugin/` / `.codex-plugin/`
+  namespacing pattern. Docs added to `install-guidance.md` (project-
+  config, global-config, and manual-symlink install paths),
+  `README.md` ("Works with" line + Install block + Release candidates
+  section), `CONTRIBUTING.md` (skill-author checklist), and
+  `github-action.md` (CI integration via `anomalyco/opencode/github`).
 
 ### Known limitations (v1.5 candidates)
 

@@ -134,6 +134,37 @@ If you use OpenAI Codex, you can chain the deterministic analysis with [`openai/
 
 You can also trigger reviews from PR comments with `@codex review` if the Codex GitHub app is installed on the repo.
 
+## opencode-powered review (alternative)
+
+If you use [opencode](https://github.com/sst/opencode), chain the deterministic analysis with [`anomalyco/opencode/github`](https://github.com/anomalyco/opencode) for AI-powered PR reviews. opencode is provider-agnostic (BYOK across Anthropic, OpenAI, Google, Zhipu, and 75+ others via [Models.dev](https://models.dev)), so pick whichever model fits your budget and latency.
+
+```yaml
+      - uses: anomalyco/opencode/github@latest
+        if: github.event_name == 'pull_request' && env.ANTHROPIC_API_KEY != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: anthropic/claude-sonnet-4-6
+          agent: build
+          use_github_token: true
+          prompt: |
+            The kicad-happy deterministic analysis has already been run.
+            Read the markdown report at ${{ steps.analysis.outputs.report-path }}.
+
+            Do NOT re-run analysis scripts. Review the findings and:
+            1. Verify the top 3-5 IC pinouts against datasheets
+            2. Check WARNING findings for accuracy
+            3. Note anything the analysis may have missed
+
+            Post a concise summary (under 2000 chars) as a PR comment.
+            Focus on actionable findings only.
+```
+
+Set the `model` field to any Models.dev id (e.g. `openai/gpt-5`, `zai-coding-plan/glm-5.1`) and match the env var to that provider's key. `use_github_token: true` lets opencode post the review comment via the workflow's `GITHUB_TOKEN`. See the [opencode providers catalog](https://opencode.ai/docs/providers) for the full model list.
+
+For comment-triggered reviews (e.g. `/oc` or `/opencode` on a PR or issue), `anomalyco/opencode/github` supports `issue_comment` and `pull_request_review_comment` triggers with a filter on comment body — see [corv89/kicad-happy's interactive workflow example](https://github.com/corv89/kicad-happy/blob/main/action/examples/opencode-interactive.yml) for the verified pattern.
+
 ## More examples
 
 See [`action/examples/`](action/examples/) for fork-safe workflows, distributor API keys for datasheet download, and advanced configuration.
