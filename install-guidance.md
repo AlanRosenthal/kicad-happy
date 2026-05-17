@@ -395,6 +395,66 @@ done
 
 ---
 
+## opencode
+
+opencode auto-discovers the repo's skills via `.opencode/opencode.json`, which points its skill loader at the existing `skills/` tree — no `AGENTS.md`, no file duplication, no symlinks required.
+
+### Install (recommended: clone + run from repo)
+
+```bash
+git clone https://github.com/aklofas/kicad-happy.git
+cd kicad-happy
+opencode
+```
+
+When opencode starts, it walks up from cwd looking for `.opencode/opencode.json` (and root-level `opencode.json`), finds the shipped manifest, and loads all 12 skills from `./skills/`. Verify with `/skills list` in the session.
+
+### Install (global, available from any project)
+
+To use kicad-happy from any working directory, add an absolute path to your global opencode config:
+
+```bash
+# macOS / Linux
+mkdir -p ~/.config/opencode
+cat >> ~/.config/opencode/opencode.json <<'EOF'
+{
+  "skills": { "paths": ["/absolute/path/to/kicad-happy/skills"] }
+}
+EOF
+```
+
+Or, since opencode also reads `~/.claude/skills/` natively, the Claude Code manual-symlink install in the [Claude Code section](#claude-code) above makes the skills available to opencode automatically.
+
+### Install (manual symlinks into opencode-native location)
+
+```bash
+git clone https://github.com/aklofas/kicad-happy.git
+cd kicad-happy
+mkdir -p ~/.config/opencode/skills
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+  ln -sf "$(pwd)/skills/$skill" ~/.config/opencode/skills/$skill
+done
+```
+
+See [Windows symlink issues](#windows-symlink-issues) if symlinks fail on Windows.
+
+### Upgrade
+
+`git pull` in the cloned repo. Skills follow the live checkout regardless of install method (project-config, global-config absolute path, or symlinks).
+
+### Known issues
+
+- **No marketplace / no `plugin install <git-url>` analog.** opencode has no equivalent to Claude Code's `/plugin install` or Codex's `$skill-installer`. Distribution is "git clone" plus one of the discovery mechanisms above. Track [sst/opencode issue tracker](https://github.com/sst/opencode/issues) for marketplace plans.
+- **Project-config path resolution is cwd-relative.** The shipped `.opencode/opencode.json` uses `"./skills"`, which resolves correctly when opencode is launched from the repo root. If you launch opencode from a subdirectory of the cloned repo, skills won't be found — use the global-config install instead.
+- **Skill discovery churn (late 2025 / early 2026).** Several skill-loader bugs landed close together: glob mismatch ([#6177](https://github.com/sst/opencode/issues/6177), fixed), `.claude/skills/` global traversal ([#6400](https://github.com/sst/opencode/issues/6400)), `skills.path` config naming. Pin a recent opencode version (Dec 2025+) if discovery misbehaves.
+- **`allowed-tools` frontmatter is ignored.** opencode requires only `name` and `description`; other frontmatter fields (including `allowed-tools`) pass through harmlessly but are not enforced.
+
+### opencode-specific notes
+
+<!-- opencode maintainers: add platform-specific guidance below this line -->
+
+---
+
 ## Universal installer (npx skills)
 
 [Vercel's `npx skills`](https://github.com/vercel-labs/skills) auto-detects which

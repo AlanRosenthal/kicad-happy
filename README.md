@@ -7,7 +7,7 @@
 
 AI-powered design review for KiCad. Analyzes schematics, PCB layouts, and Gerbers. Catches real bugs before you order boards.
 
-Works with **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[OpenAI Codex](https://github.com/openai/codex)**, **[GitHub Copilot CLI](https://docs.github.com/en/copilot)**, and **[Gemini CLI](https://github.com/google-gemini/gemini-cli)**, as a **GitHub Action** for automated PR reviews, or as standalone Python scripts you can run anywhere.
+Works with **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[OpenAI Codex](https://github.com/openai/codex)**, **[GitHub Copilot CLI](https://docs.github.com/en/copilot)**, **[Gemini CLI](https://github.com/google-gemini/gemini-cli)**, and **[opencode](https://github.com/sst/opencode)**, as a **GitHub Action** for automated PR reviews, or as standalone Python scripts you can run anywhere.
 
 These skills turn your AI coding agent into a full-fledged electronics design assistant that understands your KiCad projects at a deep level: parses schematics and PCB layouts into structured data, cross-references component values against datasheets, detects common design errors, and walks you through the full prototype-to-production workflow.
 
@@ -136,6 +136,16 @@ done
 
 See [install-guidance.md](install-guidance.md#google-gemini-cli) for workspace-scope installs and upgrade notes.
 
+**opencode:**
+
+```bash
+git clone https://github.com/aklofas/kicad-happy.git
+cd kicad-happy
+opencode
+```
+
+The repo ships `.opencode/opencode.json`, which opencode auto-discovers and uses to load all 12 skills from `./skills/`. For global availability across all projects, see [install-guidance.md](install-guidance.md#opencode).
+
 <details>
 <summary><strong>Manual install & other platforms</strong></summary>
 
@@ -191,7 +201,7 @@ The stable install commands above always resolve to the latest stable release on
 
 This pins to the rc.1 tag. Stable users on the un-suffixed marketplace are unaffected. To switch back to stable, remove the marketplace and re-add it without the `#` suffix.
 
-**Codex / Gemini CLI:** clone the repo and check out the `v1.4.0-rc.1` tag before running the symlink install above:
+**Codex / Gemini CLI / opencode:** clone the repo and check out the `v1.4.0-rc.1` tag before running the install above:
 
 ```bash
 git clone https://github.com/aklofas/kicad-happy.git
