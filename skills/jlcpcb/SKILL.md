@@ -165,6 +165,61 @@ To fix rotation issues:
 7. Review part matching — fix any unmatched parts by searching LCSC numbers
 8. Confirm and order
 
+### Translating Altium / KiCad BOM and CPL files
+
+For boards exported from Altium (or other tools) whose BOM/CPL formats
+don't match JLCPCB's expected columns, the `bom` skill ships
+`translate_bom_pnp.py` to convert them. Two subcommands:
+
+```bash
+# BOM: KiCad/Altium CSV → JLCPCB BOM CSV (Comment, Designator, Footprint,
+#                                         LCSC Part #, MPN, Manufacturer,
+#                                         Quantity, Notes)
+python3 skills/bom/scripts/translate_bom_pnp.py bom input_bom.csv -o jlc_bom.csv
+
+# CPL: input CPL → JLCPCB Pick-and-Place CSV (Designator, Mid X, Mid Y,
+#                                              Layer, Rotation), with mil→mm
+#                                              and TopLayer/BottomLayer
+#                                              normalization
+python3 skills/bom/scripts/translate_bom_pnp.py pnp input_cpl.csv -o jlc_cpl.csv
+```
+
+#### The 3-step PCBA upload workflow (avoids rejection)
+
+JLCPCB's PCBA web upload rejects orders when the CPL contains designators
+that aren't in the BOM (mechanical holes, fiducials, test points, etc.
+that appear in the CPL output but aren't assembly components). The
+translator's `--bom` filter mode solves this:
+
+1. **Translate the BOM first** — produces the JLCPCB-format BOM and
+   establishes the authoritative designator set:
+   ```bash
+   python3 skills/bom/scripts/translate_bom_pnp.py bom input_bom.csv -o jlc_bom.csv
+   ```
+
+2. **Translate the CPL with `--bom` filter** — intersects CPL designators
+   with BOM designators, dropping orphans:
+   ```bash
+   python3 skills/bom/scripts/translate_bom_pnp.py pnp input_cpl.csv -o jlc_cpl.csv --bom jlc_bom.csv
+   ```
+   The returned `filtered_orphans` count plus `filtered_orphan_samples`
+   list lets the operator confirm which CPL rows were dropped — sanity-
+   check this list before uploading. Common orphans (mounting holes,
+   fiducials, test points) are expected; anything else may indicate a
+   BOM/PCB mismatch worth investigating.
+
+3. **Tabulate consigned-parts cost separately** — JLCPCB's quote does
+   not auto-itemize consigned (user-supplied) part costs. Build a quote
+   summary that shows: PCB fabrication, PCBA assembly fee, basic vs
+   extended parts cost (per JLCPCB invoice), and a separate
+   user-sourced parts subtotal. Without this breakdown the quote
+   understates true unit cost by the consigned-parts amount.
+
+This workflow is documented because JLCPCB's web upload UX silently
+rejects orphan-designator CPLs with an unhelpful error; the parity
+check via `--bom` is the single highest-value step in shipping a
+clean PCBA order.
+
 ## Tips
 
 - **Prefer Basic parts** — no extra fee, always in stock, faster assembly
