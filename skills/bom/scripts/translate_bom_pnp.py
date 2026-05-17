@@ -434,6 +434,51 @@ def translate_bom(input_path: str, output_path: str) -> dict:
     return stats
 
 
+def _expand_designators(field: str) -> list[str]:
+    """Split a comma/whitespace-separated designator list into individual refs.
+
+    >>> _expand_designators("C1, C2, C5")
+    ['C1', 'C2', 'C5']
+    >>> _expand_designators("R1")
+    ['R1']
+    >>> _expand_designators("C1; C2")
+    ['C1', 'C2']
+    >>> _expand_designators("")
+    []
+    """
+    if not field:
+        return []
+    for sep in (",", ";"):
+        field = field.replace(sep, " ")
+    return [tok.strip() for tok in field.split() if tok.strip()]
+
+
+def _read_bom_designators(bom_path: str) -> set[str]:
+    """Read BOM CSV and return the set of all designators present.
+
+    Accepts either JLCPCB-format output (Designator column) or
+    upstream BOM formats (Reference/Designator/RefDes synonyms).
+    """
+    rows = _read_csv_rows(bom_path)
+    if not rows:
+        return set()
+
+    header_idx = _detect_header_row(rows)
+    header = rows[header_idx]
+    col_des = _find_col(header, BOM_DES_FIELDS)
+    if col_des is None:
+        raise ValueError(
+            f"BOM at {bom_path} has no Designator column (header row {header_idx}: {header})"
+        )
+
+    refs: set[str] = set()
+    for raw in rows[header_idx + 1 :]:
+        if col_des >= len(raw):
+            continue
+        refs.update(_expand_designators(raw[col_des]))
+    return refs
+
+
 def translate_pnp(
     input_path: str, output_path: str, *, bom_filter_path: str | None = None
 ) -> dict:
@@ -483,8 +528,10 @@ def translate_pnp(
         "bom_designators": 0,
     }
 
-    # --bom filter — implemented in Task 4; for now, all rows pass through.
     bom_designators: set[str] | None = None
+    if bom_filter_path:
+        bom_designators = _read_bom_designators(bom_filter_path)
+        stats["bom_designators"] = len(bom_designators)
 
     def _cell(row: list[str], idx: int | None) -> str:
         if idx is None or idx >= len(row):
@@ -622,13 +669,61 @@ def _self_test() -> int:
         if ",B," not in out_text:
             failures.append("PNP output missing normalized 'B' layer")
 
+    # --- PNP with --bom filter: drops CPL rows whose designators aren't in BOM ---
+    bom_for_filter = (
+        "Comment,Designator,Footprint,LCSC Part #,MPN,Manufacturer,Quantity,Notes\n"
+        "100nF,C1,Cap_0402,,,,,\n"
+        "10k,R1,Res_0402,,,,,\n"
+    )
+    cpl_for_filter = (
+        "Designator,Mid X (mm),Mid Y (mm),Layer,Rotation\n"
+        "R1,10.0,10.0,T,0\n"
+        "C1,20.0,20.0,T,90\n"
+        "U1,30.0,30.0,T,0\n"
+        "TP1,40.0,40.0,T,0\n"
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        bom_path = Path(tmp) / "bom_for_filter.csv"
+        cpl_path = Path(tmp) / "cpl_for_filter.csv"
+        out_path = Path(tmp) / "cpl_out_filtered.csv"
+        bom_path.write_text(bom_for_filter)
+        cpl_path.write_text(cpl_for_filter)
+
+        stats = translate_pnp(
+            str(cpl_path), str(out_path), bom_filter_path=str(bom_path)
+        )
+
+        if stats["rows_out"] != 2:
+            failures.append(
+                f"PNP-filter rows_out: expected 2 (R1, C1 in BOM), got {stats['rows_out']}"
+            )
+        if stats["filtered_orphans"] != 2:
+            failures.append(
+                f"PNP-filter filtered_orphans: expected 2 (U1, TP1), got "
+                f"{stats['filtered_orphans']}"
+            )
+        if set(stats["filtered_orphan_samples"]) != {"U1", "TP1"}:
+            failures.append(
+                f"PNP-filter orphan_samples: expected {{U1, TP1}}, got "
+                f"{stats['filtered_orphan_samples']}"
+            )
+        if stats["bom_designators"] != 2:
+            failures.append(
+                f"PNP-filter bom_designators: expected 2, got {stats['bom_designators']}"
+            )
+
+        out_text = out_path.read_text()
+        if "U1," in out_text or "TP1," in out_text:
+            failures.append("PNP-filter output unexpectedly contains orphan designators")
+
     if failures:
         print("self-test: FAIL")
         for f in failures:
             print(f"  - {f}")
         return 1
 
-    print("self-test: PASS (BOM + PNP translation)")
+    print("self-test: PASS (BOM + PNP + --bom filter)")
     return 0
 
 
