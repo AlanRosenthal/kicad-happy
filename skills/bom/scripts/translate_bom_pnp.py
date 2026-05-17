@@ -149,6 +149,116 @@ def _detect_header_row(rows: list[list[str]]) -> int:
     return best_idx
 
 
+UNIT_TO_MM = {
+    "mm": 1.0,
+    "mil": 0.0254,
+    "inch": 25.4,
+    "in": 25.4,
+    "cm": 10.0,
+}
+
+
+def _parse_units_from_header(header_cell: str) -> str:
+    """Extract a unit hint from a header cell like 'Mid X (mil)' → 'mil'.
+
+    >>> _parse_units_from_header("Mid X (mil)")
+    'mil'
+    >>> _parse_units_from_header("Mid Y(mm)")
+    'mm'
+    >>> _parse_units_from_header("Center-X [inch]")
+    'inch'
+    >>> _parse_units_from_header("Reference")
+    ''
+    """
+    if not header_cell:
+        return ""
+    s = header_cell.strip().lower()
+    for unit in UNIT_TO_MM:
+        for opener, closer in (("(", ")"), ("[", "]")):
+            tok = f"{opener}{unit}{closer}"
+            if tok in s:
+                return unit
+    return ""
+
+
+def _coord_to_mm(cell: str, default_unit: str) -> float | None:
+    """Parse a coordinate cell to mm. Honor in-cell unit suffix if present.
+
+    >>> _coord_to_mm("12.5", "mm")
+    12.5
+    >>> _coord_to_mm("100mil", "mm")
+    2.54
+    >>> _coord_to_mm("1inch", "")
+    25.4
+    >>> _coord_to_mm("", "mm") is None
+    True
+    """
+    if not cell:
+        return None
+    s = cell.strip().lower()
+    # In-cell unit suffix override
+    for unit, factor in UNIT_TO_MM.items():
+        if s.endswith(unit):
+            try:
+                return float(s[: -len(unit)].strip()) * factor
+            except ValueError:
+                return None
+    # Bare numeric — use default unit
+    try:
+        value = float(s)
+    except ValueError:
+        return None
+    factor = UNIT_TO_MM.get(default_unit, 1.0) if default_unit else 1.0
+    return value * factor
+
+
+def _normalize_layer(cell: str) -> str:
+    """Normalize layer label to 'T' or 'B'. Pass through unknowns unchanged.
+
+    >>> _normalize_layer("TopLayer")
+    'T'
+    >>> _normalize_layer("F.Cu")
+    'T'
+    >>> _normalize_layer("Top")
+    'T'
+    >>> _normalize_layer("BottomLayer")
+    'B'
+    >>> _normalize_layer("B.Cu")
+    'B'
+    >>> _normalize_layer("Inner1")
+    'Inner1'
+    """
+    if not cell:
+        return cell
+    s = cell.strip().lower()
+    if s in ("top", "toplayer", "f.cu", "front", "t"):
+        return "T"
+    if s in ("bottom", "bottomlayer", "b.cu", "back", "b"):
+        return "B"
+    return cell.strip()
+
+
+def _detect_pnp_header_row(rows: list[list[str]]) -> int:
+    """Return index of best-match CPL header row (analogous to BOM detection).
+
+    >>> _detect_pnp_header_row([["x", "y"], ["Designator", "Mid X", "Mid Y", "Layer"]])
+    1
+    """
+    best_idx, best_score = 0, 0
+    for i, row in enumerate(rows[:HEADER_SCAN_LIMIT]):
+        if not row:
+            continue
+        cells_lc = [(c or "").strip().lower() for c in row]
+        score = sum(
+            1
+            for group in (PNP_REF_FIELDS, PNP_X_FIELDS, PNP_Y_FIELDS, PNP_LAYER_FIELDS)
+            if any(any(c in cell for c in group) for cell in cells_lc)
+        )
+        if score > best_score and score >= 2:
+            best_idx, best_score = i, score
+    return best_idx
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="translate_bom_pnp",
@@ -327,11 +437,100 @@ def translate_bom(input_path: str, output_path: str) -> dict:
 def translate_pnp(
     input_path: str, output_path: str, *, bom_filter_path: str | None = None
 ) -> dict:
-    """Translate a CPL file to JLCPCB format. Returns stats dict.
+    """Translate a CPL file to JLCPCB Pick-and-Place format.
 
-    Placeholder — implemented in Task 3 (and --bom filter in Task 4).
+    If ``bom_filter_path`` is supplied, CPL rows whose designators are
+    not present in the BOM are dropped (avoids JLCPCB upload rejection
+    on orphan designators).
     """
-    raise NotImplementedError("translate_pnp — implemented in Task 3")
+    rows = _read_csv_rows(input_path)
+    if not rows:
+        raise ValueError(f"CPL is empty: {input_path}")
+
+    header_idx = _detect_pnp_header_row(rows)
+    header = rows[header_idx]
+    data_rows = rows[header_idx + 1 :]
+
+    col_ref = _find_col(header, PNP_REF_FIELDS)
+    col_x = _find_col(header, PNP_X_FIELDS)
+    col_y = _find_col(header, PNP_Y_FIELDS)
+    col_layer = _find_col(header, PNP_LAYER_FIELDS)
+    col_rot = _find_col(header, PNP_ROT_FIELDS)
+
+    if col_ref is None or col_x is None or col_y is None:
+        raise ValueError(
+            f"CPL missing required columns (Designator, Mid X, Mid Y). "
+            f"Header at row {header_idx}: {header}"
+        )
+
+    default_x_unit = _parse_units_from_header(header[col_x])
+    default_y_unit = _parse_units_from_header(header[col_y])
+    default_unit = default_x_unit or default_y_unit  # whichever has a hint
+    if default_unit:
+        default_x_unit = default_x_unit or default_unit
+        default_y_unit = default_y_unit or default_unit
+
+    stats = {
+        "input": input_path,
+        "output": output_path,
+        "header_row": header_idx,
+        "default_unit": default_unit or "mm",
+        "rows_in": 0,
+        "rows_out": 0,
+        "skipped_no_coords": 0,
+        "filtered_orphans": 0,
+        "filtered_orphan_samples": [],
+        "bom_designators": 0,
+    }
+
+    # --bom filter — implemented in Task 4; for now, all rows pass through.
+    bom_designators: set[str] | None = None
+
+    def _cell(row: list[str], idx: int | None) -> str:
+        if idx is None or idx >= len(row):
+            return ""
+        return (row[idx] or "").strip()
+
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Designator", "Mid X", "Mid Y", "Layer", "Rotation"])
+
+        for raw in data_rows:
+            stats["rows_in"] += 1
+            if not any((c or "").strip() for c in raw):
+                continue
+
+            ref = _cell(raw, col_ref)
+            if not ref:
+                continue
+
+            if bom_designators is not None and ref not in bom_designators:
+                stats["filtered_orphans"] += 1
+                if len(stats["filtered_orphan_samples"]) < 15:
+                    stats["filtered_orphan_samples"].append(ref)
+                continue
+
+            x_mm = _coord_to_mm(_cell(raw, col_x), default_x_unit)
+            y_mm = _coord_to_mm(_cell(raw, col_y), default_y_unit)
+            if x_mm is None or y_mm is None:
+                stats["skipped_no_coords"] += 1
+                continue
+
+            layer = _normalize_layer(_cell(raw, col_layer))
+            rotation = _cell(raw, col_rot) or "0"
+
+            writer.writerow(
+                [
+                    ref,
+                    f"{x_mm:.4f}mm",
+                    f"{y_mm:.4f}mm",
+                    layer,
+                    rotation,
+                ]
+            )
+            stats["rows_out"] += 1
+
+    return stats
 
 
 def _self_test() -> int:
@@ -384,13 +583,52 @@ def _self_test() -> int:
         if "Bare PCB" in out_text:
             failures.append("BOM output unexpectedly contains PCB-marker row")
 
+    # --- PNP translation: mil-unit CPL with TopLayer/BottomLayer + bare numeric ---
+    pnp_csv = (
+        "Designator,Mid X (mil),Mid Y (mil),Layer,Rotation\n"
+        "R1,100,200,TopLayer,90\n"
+        "C1,500.5,1000,BottomLayer,0\n"
+        "U1,2000,3000,F.Cu,180\n"
+        ",,,,\n"
+        "BAD,not-a-number,500,TopLayer,0\n"
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = Path(tmp) / "cpl_in.csv"
+        out_path = Path(tmp) / "cpl_out.csv"
+        in_path.write_text(pnp_csv)
+        stats = translate_pnp(str(in_path), str(out_path))
+
+        if stats["rows_out"] != 3:
+            failures.append(f"PNP rows_out: expected 3 (R1,C1,U1), got {stats['rows_out']}")
+        if stats["skipped_no_coords"] != 1:
+            failures.append(
+                f"PNP skipped_no_coords: expected 1 (BAD), got {stats['skipped_no_coords']}"
+            )
+        if stats["default_unit"] != "mil":
+            failures.append(
+                f"PNP default_unit: expected 'mil', got {stats['default_unit']!r}"
+            )
+
+        out_text = out_path.read_text()
+        # 100 mil = 2.54 mm, 200 mil = 5.08 mm
+        if "2.5400mm" not in out_text or "5.0800mm" not in out_text:
+            failures.append(
+                "PNP output missing expected mil→mm conversion (2.5400mm/5.0800mm)"
+            )
+        # Layer normalization
+        if ",T," not in out_text:
+            failures.append("PNP output missing normalized 'T' layer")
+        if ",B," not in out_text:
+            failures.append("PNP output missing normalized 'B' layer")
+
     if failures:
         print("self-test: FAIL")
         for f in failures:
             print(f"  - {f}")
         return 1
 
-    print("self-test: PASS (BOM translation)")
+    print("self-test: PASS (BOM + PNP translation)")
     return 0
 
 
