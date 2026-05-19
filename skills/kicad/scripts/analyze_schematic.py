@@ -9463,10 +9463,12 @@ def main():
             result["datasheet_verification"] = ds_verify
     except ImportError:
         pass
-    except (OSError, ValueError, TypeError, KeyError) as e:
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+        # AttributeError added for rc.3 — defense against future None-leaks
+        # in datasheet_verify.py (see _load_extraction normalization).
         result["datasheet_verification"] = {
             "findings": [],
-            "summary": {"error": str(e)},
+            "summary": {"error": f"{type(e).__name__}: {e}"},
         }
 
     from output_filters import apply_output_filters
