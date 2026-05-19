@@ -107,5 +107,77 @@ def main() -> int:
         return 0
 
 
+def test_placement_sniff() -> int:
+    """Test that verify_v14_extraction flags absolute_max entries citing
+    non-stress-rating sections (the USBLC6 failure mode).
+    """
+    from datasheet_verify import verify_v14_extraction
+
+    # Synthetic v1.4 extraction with the USBLC6-style misplacement:
+    # entries citing "Table 2. Electrical characteristics" placed in absolute_max.
+    extraction = {
+        "schema_version": "1.0",
+        "source": {"local_path": "fake.pdf", "sha256": "deadbeef"},
+        "extraction": {"quality_score": 77},
+        "base": {
+            "pinout": [],
+            "recommended_operating": {},
+            "absolute_max": {
+                # CORRECT: cites stress-rating section
+                "TJ_max": [{
+                    "min": None, "max": 150, "typ": None, "unit": "°C",
+                    "condition": "Junction temperature",
+                    "evidence": {"section": "7.1 Absolute Maximum Ratings", "page": 5},
+                }],
+                # WRONG: cites Table 2 (electrical chars), should be flagged
+                "VBR": [{
+                    "min": 6.0, "max": None, "typ": None, "unit": "V",
+                    "condition": "Breakdown voltage",
+                    "evidence": {"section": "Table 2. Electrical characteristics", "page": 4},
+                }],
+                "VF_max": [{
+                    "min": None, "max": 1.1, "typ": None, "unit": "V",
+                    "condition": "Forward voltage at IF=10mA",
+                    "evidence": {"section": "Table 2. Electrical characteristics", "page": 4},
+                }],
+            },
+        },
+        "categories": [],
+    }
+
+    issues = verify_v14_extraction(extraction)
+    placement_issues = [
+        i for i in issues if "absolute_max" in i.get("path", "") and "section" in i.get("path", "")
+    ]
+
+    if len(placement_issues) != 2:
+        print(
+            f"FAIL: expected 2 placement-sniff issues (VBR + VF_max), "
+            f"got {len(placement_issues)}: {placement_issues}",
+            file=sys.stderr,
+        )
+        return 1
+
+    paths = {i["path"] for i in placement_issues}
+    expected = {
+        "base.absolute_max.VBR[0].evidence.section",
+        "base.absolute_max.VF_max[0].evidence.section",
+    }
+    if paths != expected:
+        print(f"FAIL: unexpected paths. got {paths}, expected {expected}", file=sys.stderr)
+        return 1
+
+    # TJ_max cites an Absolute Maximum Ratings section — must NOT be flagged
+    tj_flagged = any("TJ_max" in i["path"] for i in placement_issues)
+    if tj_flagged:
+        print(f"FAIL: TJ_max (correctly placed) was wrongly flagged", file=sys.stderr)
+        return 1
+
+    print("PASS: placement-sniff flags Table 2 entries, leaves Absolute Max section alone")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    rc1 = main()
+    rc2 = test_placement_sniff()
+    sys.exit(rc1 | rc2)
