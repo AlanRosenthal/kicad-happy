@@ -382,9 +382,9 @@ def verify_decoupling(components: list, nets: dict, extraction_dir: str,
             continue
 
         extraction = _load_extraction(extraction_dir, mpn)
-        app_circuit = extraction.get("application_circuit", {})
-        if not app_circuit:
+        if not extraction or not extraction.get("application_circuit"):
             continue
+        app_circuit = extraction["application_circuit"]
 
         pin_nets = comp.get("pin_nets", {})
         ext_pins = {str(p.get("number", "")): p for p in extraction.get("pins", [])}
