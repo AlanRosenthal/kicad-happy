@@ -31,7 +31,7 @@ v1.3 legacy pipeline (read-only in v1.4):
   extractions never write the v1.3 format.
 
 Analyzer skills consume (v1.4 typed):
-  kicad, emc, spice, thermal, kidoc
+  kicad, emc, spice, thermal
     → lookup(mpn, cache_dir=Path("datasheets/extracted"))  → DatasheetFacts | None
     → best(facts.regulator.vin_range, min_confidence="medium")  → SpecValue | None
     → trusted(facts.base.absolute_max["VDD"], min_confidence="high")  → list[SpecValue]
@@ -299,10 +299,9 @@ The verifier runs as part of the normal schematic analyzer pass; findings it rai
 | `emc` | SRF data for caps, saturation current for inductors, thermal pad presence |
 | `spice` | Behavioral model parameters (GBW, slew rate, input offset) for opamps |
 | `thermal` | Junction-to-ambient resistance, max junction temp |
-| `kidoc` | Feature tables and pin audits in engineering documentation outputs |
 
 Trust flows outward: the datasheets skill doesn't consume from other skills, only produces for them. This keeps the extraction layer simple and auditable — one skill owns the PDF-to-JSON contract, all other skills read it.
 
 ## Promoted from kicad in v1.3
 
-Earlier versions kept extraction scripts under `skills/kicad/scripts/`. In v1.3 the extraction infrastructure became its own top-level skill (`skills/datasheets/`) with its own reference docs (`extraction-schema.md`, `quality-scoring.md`, `field-extraction-guide.md`, `consumer-api.md`). The promotion reflects the expanding consumer surface — once EMC, SPICE, thermal, and kidoc all started depending on verified per-part knowledge, treating it as a `kicad` internal was no longer accurate.
+Earlier versions kept extraction scripts under `skills/kicad/scripts/`. In v1.3 the extraction infrastructure became its own top-level skill (`skills/datasheets/`) with its own reference docs (`extraction-schema.md`, `quality-scoring.md`, `field-extraction-guide.md`, `consumer-api.md`). The promotion reflects the expanding consumer surface — once EMC, SPICE, and thermal all started depending on verified per-part knowledge, treating it as a `kicad` internal was no longer accurate.

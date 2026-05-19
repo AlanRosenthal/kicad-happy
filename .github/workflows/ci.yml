@@ -76,9 +76,6 @@ jobs:
       - name: bom_manager.py --help
         run: python3 skills/bom/scripts/bom_manager.py --help > /dev/null
 
-      - name: kidoc_orchestrator.py --help
-        run: python3 skills/kidoc/scripts/kidoc_orchestrator.py --help > /dev/null
-
   harness-smoke:
     runs-on: ubuntu-latest
 

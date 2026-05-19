@@ -119,17 +119,17 @@ If you prefer a manual install, install the skills into `~/.codex/skills/`.
 
 **Google Gemini CLI:**
 
-`gemini skills install <url>` does not recurse into this monorepo's `skills/` directory. Clone and link all 12 at once:
+`gemini skills install <url>` does not recurse into this monorepo's `skills/` directory. Clone and link all 11 at once:
 
 ```bash
 git clone https://github.com/aklofas/kicad-happy.git
 gemini skills link ./kicad-happy/skills
 ```
 
-Or install all 12 skills directly from the URL using `--path` (requires Gemini CLI ≥ Jan 13 2026):
+Or install all 11 skills directly from the URL using `--path` (requires Gemini CLI ≥ Jan 13 2026):
 
 ```bash
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   gemini skills install https://github.com/aklofas/kicad-happy.git --path skills/$skill
 done
 ```
@@ -144,7 +144,7 @@ cd kicad-happy
 opencode
 ```
 
-The repo ships `.opencode/opencode.json`, which opencode auto-discovers and uses to load all 12 skills from `./skills/`. For global availability across all projects, see [install-guidance.md](install-guidance.md#opencode).
+The repo ships `.opencode/opencode.json`, which opencode auto-discovers and uses to load all 11 skills from `./skills/`. For global availability across all projects, see [install-guidance.md](install-guidance.md#opencode).
 
 <details>
 <summary><strong>Manual install & other platforms</strong></summary>
@@ -155,7 +155,7 @@ The repo ships `.opencode/opencode.json`, which opencode auto-discovers and uses
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.claude/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.claude/skills/$skill
 done
 ```
@@ -166,7 +166,7 @@ done
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.codex/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.codex/skills/$skill
 done
 ```
@@ -177,7 +177,7 @@ done
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 New-Item -ItemType Directory -Force "$HOME\.codex\skills" | Out-Null
-"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway","kidoc" | ForEach-Object {
+"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway" | ForEach-Object {
   New-Item -ItemType SymbolicLink -Path "$HOME\.codex\skills\$_" -Target "$(Get-Location)\skills\$_" -Force | Out-Null
 }
 ```
@@ -226,8 +226,7 @@ See the **[GitHub Action setup guide](github-action.md)** for workflow examples,
 | **kicad**     | ⚡ Parse and analyze KiCad schematics, PCB layouts, Gerbers, and PDF reference designs. Automated subcircuit detection, design review, DFM.                                               |
 | **spice**     | 🔬 SPICE simulation — generates testbenches for detected subcircuits, validates filter frequencies, opamp gains, divider ratios. Monte Carlo tolerance analysis. ngspice, LTspice, Xyce. |
 | **emc**       | 📡 EMC pre-compliance — 44 rule checks for radiated emission risks, PDN impedance, diff pair skew, ESD paths. FCC/CISPR/automotive/military.                                             |
-| **datasheets**| 📄 Extract structured specs from datasheet PDFs — pinouts, electrical characteristics, peripherals, topology. Per-MPN caching with quality scoring. Consumed by kicad/emc/spice/thermal/kidoc. |
-| **kidoc**     | 📄 **(beta)** Engineering documentation — HDD, CE technical file, ICD, design review, manufacturing, and more. Auto-generated figures, PDF/DOCX/ODT/HTML output.                         |
+| **datasheets**| 📄 Extract structured specs from datasheet PDFs — pinouts, electrical characteristics, peripherals, topology. Per-MPN caching with quality scoring. Consumed by kicad/emc/spice/thermal. |
 | **bom**       | 📋 Full BOM lifecycle — analyze, source, price, export tracking CSVs, generate per-supplier order files.                                                                                 |
 | **digikey**   | 🔎 Search DigiKey for components and download datasheets via API.                                                                                                                        |
 | **mouser**    | 🔎 Search Mouser for components and download datasheets.                                                                                                                                 |
@@ -343,7 +342,7 @@ Datasheets flow through kicad-happy in two stages:
 
 **Sync (download).** Pulls PDFs for every component with an MPN from DigiKey, LCSC, element14, or Mouser into a local `datasheets/` directory. 96% success rate across 240+ manufacturers. Each PDF is verified against the expected part number.
 
-**Extract (parse).** The **datasheets** skill turns those PDFs into structured JSON — pinouts, voltage ratings, electrical characteristics, peripherals, topology, SPICE model coefficients. Extractions are cached per-MPN under `<project>/datasheets/extracted/` and scored on a five-dimension quality rubric. Analyzer skills (`kicad`, `emc`, `spice`, `thermal`, `kidoc`) consume the cache through a shared helper API with trust gates — so a schematic finding tagged `confidence: datasheet-backed` means a scored extraction produced the underlying fact, not a keyword match on the part number.
+**Extract (parse).** The **datasheets** skill turns those PDFs into structured JSON — pinouts, voltage ratings, electrical characteristics, peripherals, topology, SPICE model coefficients. Extractions are cached per-MPN under `<project>/datasheets/extracted/` and scored on a five-dimension quality rubric. Analyzer skills (`kicad`, `emc`, `spice`, `thermal`) consume the cache through a shared helper API with trust gates — so a schematic finding tagged `confidence: datasheet-backed` means a scored extraction produced the underlying fact, not a keyword match on the part number.
 
 For the full pipeline — page selection, the quality rubric, the consumer API, and what it deliberately doesn't do — see **[Datasheet Extraction Guide](datasheet-extraction.md)**.
 
@@ -393,61 +392,6 @@ Fabrication Release Gate — 8 check categories
 ```
 
 **BOM export** — cross-references LCSC part numbers, formats to JLCPCB's exact spec, flags basic vs extended parts. Per-supplier upload files — DigiKey bulk-add CSV, Mouser cart format, LCSC BOM — with quantities already computed for your board count + spares.
-
-## 📄 KiDoc — Engineering documentation (beta)
-
-> "Generate an HDD for my board"
-
-> "Create a CE technical file for this design"
-
-The **KiDoc** skill generates professional engineering documents from your KiCad project. It auto-runs all analyses (schematic, PCB, EMC, thermal), renders publication-quality figures, and produces a structured markdown scaffold that you fill in with engineering narrative — then outputs PDF, DOCX, ODT, or HTML.
-
-**8 document types:**
-
-| Document              | What it covers                                                                            |
-| --------------------- | ----------------------------------------------------------------------------------------- |
-| **HDD**               | Hardware Design Description — power, signal, analog, thermal, EMC, PCB, BOM               |
-| **CE Technical File** | EU compliance — product ID, essential requirements, harmonized standards, risk assessment |
-| **Design Review**     | Review package with summary, action items, go/no-go assessment                            |
-| **ICD**               | Interface control — connector details, electrical characteristics, signal levels          |
-| **Manufacturing**     | Assembly overview, PCB fab notes, assembly instructions, test procedures                  |
-| **Power Analysis**    | Power distribution, regulator design, thermal margins, sequencing                         |
-| **Schematic Review**  | Focused schematic-only review with signal analysis                                        |
-| **EMC Report**        | Pre-compliance findings, mitigation recommendations, test plan                            |
-
-**11 auto-generated figure types:**
-
-- Power distribution trees
-- System architecture block diagrams
-- Bus topology (I2C/SPI/UART/CAN)
-- Connector pinout diagrams
-- Schematic overviews
-- Subsystem crops
-- PCB layer views
-- Thermal margin charts
-- EMC severity charts
-- SPICE validation scatter plots
-- Monte Carlo histograms
-
-```
-> "Generate documentation for my board at hardware/rev2/"
-
-  Analyzing schematic... 187 components, 12 regulators, 4 buses
-  Analyzing PCB... 6-layer, 56x56mm, routing complete
-  EMC pre-compliance... 73/100, 10 findings
-  Thermal analysis... 3 components above 85°C
-  Generating figures... 23 SVGs (power tree, architecture, 14 pinouts, ...)
-  Building scaffold... HDD.md (14 sections, 96 lines)
-  Generating PDF... HDD.pdf (24 pages)
-```
-
-The scaffold separates auto-generated data sections (component tables, power trees, signal analysis) from narrative sections where you write engineering prose. On regeneration, data sections update automatically while your narrative is preserved. A built-in context builder prepares focused data summaries for each section so the agent can help write the narrative.
-
-Figures use a prepare/render pipeline with hash-based caching — if the analysis data hasn't changed, figures aren't re-rendered.
-
-**Beta status:** KiDoc is an early skill that is being actively developed. The figure engine and document pipeline are functional and tested against 100+ real projects, but expect rough edges — some figure types may not render cleanly for all designs, narrative context quality varies by document type, and the PDF styling is still being refined. Feedback and bug reports welcome.
-
-For the full guide — all 8 document types, 12 figure generators, output formats, configuration options, and the prepare/edit/render workflow — see [KiDoc Documentation](kidoc-documentation.md).
 
 ## 🗺️ Workflow
 
@@ -504,6 +448,7 @@ v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** d
 | **6 new detectors** | Absolute-max violation, operating-range, junction temp vs TJmax, 5V-tolerance, peripheral function mismatch, missing required regulator passives. All datasheet-backed; soft-skip on cache miss. |
 | **LLM review layer** | Optional overlay on top of analyzer findings. Reviewer subagent confirms / suppresses / escalates with structured annotations; merge pipeline writes `analysis/merged/` while baseline `analysis/<analyzer>.json` stays byte-identical. Active but uncalibrated — precision/recall calibration in v1.5. |
 | **Trust + provenance** | Every analyzer emits structured `inputs` provenance (SHA-256 source hashes, run_id, upstream artifact chain). Every envelope declares `compat` (minimum consumer version, deprecated/experimental fields). Layer 1 findings deterministic and byte-stable across runs. |
+| **Removed: kidoc** | The engineering-documentation skill (introduced in v1.2 as beta) is removed. Its scope — PDF/DOCX/ODT/HTML report generation with custom SVG rendering and LLM-authored prose — conflicted with the `kicad` skill's analysis identity. Source remains accessible in git history at the `v1.3.1` tag. See [CHANGELOG](CHANGELOG.md) for the salvage notes. |
 
 See the full [CHANGELOG](CHANGELOG.md) for details.
 

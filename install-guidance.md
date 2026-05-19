@@ -40,12 +40,11 @@ the plugin ecosystem evolves.
 
 ### Skills included
 
-All 12 skills: `kicad`, `spice`, `emc`, `datasheets`, `bom`, `digikey`, `mouser`,
-`lcsc`, `element14`, `jlcpcb`, `pcbway`, `kidoc`.
+All 11 skills: `kicad`, `spice`, `emc`, `datasheets`, `bom`, `digikey`, `mouser`,
+`lcsc`, `element14`, `jlcpcb`, `pcbway`.
 
-When installing manually (symlinks or copies), include all 12. The `datasheets` skill
-was promoted to top-level in v1.3 and is consumed by kicad, emc, spice, thermal,
-and kidoc.
+When installing manually (symlinks or copies), include all 11. The `datasheets` skill
+was promoted to top-level in v1.3 and is consumed by kicad, emc, spice, and thermal.
 
 ### Optional API credentials
 
@@ -117,7 +116,7 @@ Use this if the marketplace install fails, or to pin to a specific version.
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.claude/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.claude/skills/$skill
 done
 ```
@@ -128,7 +127,7 @@ done
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
-"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway","kidoc" | ForEach-Object {
+"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway" | ForEach-Object {
   New-Item -ItemType SymbolicLink -Path "$HOME\.claude\skills\$_" -Target "$(Get-Location)\skills\$_" -Force | Out-Null
 }
 ```
@@ -198,7 +197,7 @@ Codex looks for globally installed skills in `~/.codex/skills/`.
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.codex/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.codex/skills/$skill
 done
 ```
@@ -209,7 +208,7 @@ done
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 New-Item -ItemType Directory -Force "$HOME\.codex\skills" | Out-Null
-"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway","kidoc" | ForEach-Object {
+"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway" | ForEach-Object {
   New-Item -ItemType SymbolicLink -Path "$HOME\.codex\skills\$_" -Target "$(Get-Location)\skills\$_" -Force | Out-Null
 }
 ```
@@ -259,7 +258,7 @@ Requires GitHub CLI v2.90.0+ (the `gh skill` command landed April 2026):
 gh skill install aklofas/kicad-happy kicad
 gh skill install aklofas/kicad-happy emc
 # repeat for each skill, or install all:
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   gh skill install aklofas/kicad-happy $skill
 done
 ```
@@ -279,7 +278,7 @@ Copilot CLI discovers skills from `~/.copilot/skills/`, `~/.claude/skills/`, or
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.agents/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.agents/skills/$skill
 done
 ```
@@ -325,7 +324,7 @@ Use `--path` to install individual skills directly from the repo URL. Requires G
 
 ```bash
 # Install all 12 skills:
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   gemini skills install https://github.com/aklofas/kicad-happy.git --path skills/$skill
 done
 ```
@@ -344,7 +343,7 @@ If `gemini skills link` is unavailable, symlink directly:
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.gemini/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.gemini/skills/$skill
 done
 ```
@@ -372,7 +371,7 @@ For `gemini skills link` installs, `git pull` in the cloned repo and run `/skill
 For `--path` installs, reinstall each skill:
 
 ```bash
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   gemini skills uninstall $skill
   gemini skills install https://github.com/aklofas/kicad-happy.git --path skills/$skill
 done
@@ -431,7 +430,7 @@ Or, since opencode also reads `~/.claude/skills/` natively, the Claude Code manu
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
 mkdir -p ~/.config/opencode/skills
-for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway kidoc; do
+for skill in kicad spice emc datasheets bom digikey mouser lcsc element14 jlcpcb pcbway; do
   ln -sf "$(pwd)/skills/$skill" ~/.config/opencode/skills/$skill
 done
 ```
@@ -669,7 +668,7 @@ Windows symlinks have platform-specific friction:
 without requiring Developer Mode or elevation:
 
 ```powershell
-"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway","kidoc" | ForEach-Object {
+"kicad","spice","emc","datasheets","bom","digikey","mouser","lcsc","element14","jlcpcb","pcbway" | ForEach-Object {
   New-Item -ItemType Junction -Path "$HOME\.agents\skills\$_" -Target "$(Get-Location)\skills\$_" -Force | Out-Null
 }
 ```
@@ -711,13 +710,3 @@ python3 /path/to/kicad-happy/skills/kicad/scripts/analyze_schematic.py board.kic
 - Mouser and element14 keys are simple API keys — set the env var and go.
 - LCSC needs no credentials (uses the jlcsearch community API).
 - If no API keys are set, distributor skills fall back to web search guidance.
-
-### KiDoc venv issues
-
-The kidoc skill creates a project-local Python venv on first run for PDF/DOCX/ODT
-output (requires `reportlab`, `python-docx`, `odfpy`, `Pillow`, `svglib`,
-`matplotlib`). If venv creation fails:
-
-1. Ensure `python3 -m venv` works on your system
-2. On Debian/Ubuntu: `sudo apt install python3-venv`
-3. HTML output works without the venv (zero dependencies)

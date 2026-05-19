@@ -6,6 +6,59 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
+## v1.4.0-rc.2 — 2026-05-19
+
+**Theme: Removed kidoc skill + cumulative polish over rc.1.**
+
+> Replaces `v1.4.0-rc.1` for opt-in testing:
+> ```
+> /plugin marketplace add aklofas/kicad-happy#v1.4.0-rc.2
+> /plugin install kicad-happy@kicad-happy
+> ```
+
+### Removed: kidoc skill
+
+The `kidoc` skill — engineering documentation generation, introduced in
+v1.2 as beta — has been removed. Its scope (generate PDF/DOCX/ODT/HTML
+reports with custom SVG rendering and LLM-authored prose) conflicted
+with the `kicad` skill's focus on structured-JSON analysis output, and
+the two created user-facing confusion about which entry point to use
+for a given task.
+
+Source remains accessible in git history at the `v1.3.1` tag and earlier.
+Three modules were flagged at removal time as candidates for future
+resurrection if relevant features return:
+
+- **`kicad_cli.py`** — cross-platform `kicad-cli` detection across 9 install
+  methods (PATH, Flatpak, Snap, macOS app bundles, Homebrew, Nix, Windows
+  Program Files, Chocolatey, MSYS2) with Flatpak sandbox temp-dir handling.
+  Non-trivial to rediscover.
+- **`kidoc_tables.py`** — unit formatters (`format_voltage`, `format_frequency`,
+  `format_current`, `format_capacitance`, `format_resistance`) and markdown
+  table builder. Zero-dep, cleanly liftable.
+- **Custom KiCad schematic + PCB SVG renderers** (`figures/renderers/`
+  plus `figures/lib/`) — with crop, focus-dim, highlight-nets, and
+  pin-net annotation. Reference implementation if "visualize this finding"
+  ever returns as a feature; the cheaper rebuild path is
+  `kicad-cli sch export svg` plus a small overlay layer (~300 LOC).
+
+### Other polish since rc.1
+
+(Cumulative — see `git log v1.4.0-rc.1..HEAD` on `v1.4-dev` for the full
+commit list.)
+
+- opencode platform support via `.opencode/opencode.json`
+- MattStarfield JLCPCB translator port: `translate_pnp` (KiCad CPL →
+  JLCPCB Pick-and-Place format) + `--bom` filter for orphan-designator
+  avoidance, integrated into the bom skill
+- Detector-behavior batch: 3 new rule_ids (LA-004, RS-003, LC-007)
+- TH-043 schema-vs-emit drift fix across 4 analyzers
+- KH-327: `bom/SKILL.md` description trimmed to Codex 1024-char cap + CI
+  hardening (SKILL.md char-limit check)
+- Track 4 polish + assorted doc and CI fixes
+
+---
+
 ## v1.4.0-rc.1 — 2026-05-15
 
 **Theme: Datasheet Extraction v2 + Layer 2 Review** — release candidate;

@@ -1,7 +1,7 @@
 """Rich finding schema shared by all detectors and validators.
 
 Every detection and validation finding uses make_finding() to produce
-a self-describing dict consumable by kidoc, suggest-fixes, and lighter LLMs.
+a self-describing dict consumable by suggest-fixes and lighter LLMs.
 """
 
 from __future__ import annotations

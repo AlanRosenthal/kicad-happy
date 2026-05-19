@@ -13,7 +13,6 @@ skills/
 ├── datasheets/      # Structured extraction pipeline — per-MPN cache, quality scoring, consumer API
 ├── emc/             # EMC pre-compliance (44 rules, 18 categories)
 ├── spice/           # SPICE simulation (ngspice/LTspice/Xyce)
-├── kidoc/           # Engineering documentation generation
 ├── bom/             # BOM management
 ├── digikey/         # DigiKey API integration
 ├── mouser/          # Mouser API integration

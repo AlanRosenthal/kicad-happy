@@ -275,7 +275,7 @@ result cached. Add `--compact` for single-line JSON.
 
 **Analyzer JSON is worth keeping** — these are expensive to regenerate (large
 schematics take time). `--analysis-dir` preserves every run and is the form
-downstream tools (kidoc, diff_analysis, what_if) expect. They're not worth
+downstream tools (diff_analysis, what_if) expect. They're not worth
 committing to git, but don't delete them between analysis steps.
 
 ### Harmonized Output Format

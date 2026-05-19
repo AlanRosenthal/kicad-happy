@@ -19,7 +19,6 @@ AI-powered electronics design review skills for KiCad 5-10. This document is aut
 | datasheets | Structured datasheet extraction — per-MPN cache, quality scoring, consumer API for other skills |
 | emc | EMC pre-compliance — 44 rules across 18 categories |
 | spice | SPICE simulation — auto-generated testbenches, Monte Carlo tolerance |
-| kidoc | Engineering documentation — PDF/HTML reports, schematic SVG rendering |
 | bom | BOM management — multi-supplier pricing, order file export |
 | digikey | DigiKey API — component search, datasheet download, `--mpn-list` batch mode |
 | mouser | Mouser API — component search, `--mpn-list` batch mode |
@@ -70,4 +69,4 @@ All scripts are zero-dependency (Python 3.10+ stdlib only). No `pip install` nee
 - `CONTRIBUTING.md` — How detectors work, how to add skills, test harness usage
 - `VALIDATION.md` — Test methodology and corpus statistics
 - `CHANGELOG.md` — Release history
-- `datasheet-extraction.md`, `emc-precompliance.md`, `spice-integration.md`, `kidoc-documentation.md` — Deep-dive guides for each major skill
+- `datasheet-extraction.md`, `emc-precompliance.md`, `spice-integration.md` — Deep-dive guides for each major skill
