@@ -91,7 +91,7 @@ jobs:
         run: |
           git clone https://github.com/aklofas/kicad-happy-testharness.git /tmp/harness
           cd /tmp/harness
-          git checkout 8afa41253dd
+          git checkout c19ac4a8ff2
 
       - name: Install harness dev deps (pytest, jsonschema, referencing, pyyaml)
         run: python -m pip install --disable-pip-version-check -r /tmp/harness/requirements-dev.txt
