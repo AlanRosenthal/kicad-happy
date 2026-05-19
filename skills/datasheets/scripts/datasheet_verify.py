@@ -19,14 +19,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_extraction(extract_dir: str, mpn: str) -> dict:
-    """Load extraction JSON for an MPN. Returns {} if not found."""
+    """Load extraction JSON for an MPN. Always returns dict; never None.
+
+    Trust gate: low-quality extractions return {} (treated as "no extraction
+    available" by callers). Two cache shapes supported:
+    - v1.4: extraction.quality_score on 0-100 scale, threshold 60.
+    - v1.3 legacy: meta.extraction_score on 0-10 scale, threshold 6.0.
+
+    Returns {} for: missing dir, missing MPN, file not found, JSON parse
+    error, OSError, or quality below threshold. Returns the parsed dict
+    when the cache exists and passes the trust gate (or has no quality
+    metadata at all — in that case we don't gate, let downstream decide).
+    """
     if not extract_dir or not mpn:
         return {}
 
     # Preserve dots and hyphens — planner/merger write literal MPN-named
     # files (`ABM8G-106-12.000MHZ-T.json`), so the legacy positional path
     # MUST match what they wrote. Aligned with datasheet_lookup.sanitize_mpn
-    # and the flag-mode regex at :727 (audit C1, LOG entry 63).
+    # and the flag-mode regex in _cli_v14 below.
     sanitized = re.sub(r'[^A-Za-z0-9_.-]', '_', mpn.strip())
 
     # Direct file lookup
@@ -35,11 +46,7 @@ def _load_extraction(extract_dir: str, mpn: str) -> dict:
         try:
             with open(path) as f:
                 extraction = json.load(f)
-            # Trust gate: skip low-quality extractions
-            meta = extraction.get("meta", {})
-            if meta.get("extraction_score", 0) < 6.0:
-                return None
-            return extraction
+            return extraction if _passes_trust_gate(extraction) else {}
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -59,15 +66,27 @@ def _load_extraction(extract_dir: str, mpn: str) -> dict:
                     if os.path.isfile(fpath):
                         with open(fpath) as f:
                             extraction = json.load(f)
-                        # Trust gate: skip low-quality extractions
-                        meta = extraction.get("meta", {})
-                        if meta.get("extraction_score", 0) < 6.0:
-                            return None
-                        return extraction
+                        return extraction if _passes_trust_gate(extraction) else {}
         except (json.JSONDecodeError, OSError):
             pass
 
     return {}
+
+
+def _passes_trust_gate(extraction: dict) -> bool:
+    """Return True if extraction quality is acceptable (or unknown).
+
+    v1.4: extraction.quality_score 0-100, threshold 60.
+    v1.3: meta.extraction_score 0-10, threshold 6.0.
+    No quality metadata at all: pass (don't gate; let downstream decide).
+    """
+    quality_v14 = (extraction.get("extraction") or {}).get("quality_score")
+    if isinstance(quality_v14, (int, float)):
+        return quality_v14 >= 60
+    quality_v13 = (extraction.get("meta") or {}).get("extraction_score")
+    if isinstance(quality_v13, (int, float)):
+        return quality_v13 >= 6.0
+    return True
 
 
 def _resolve_extract_dir(project_dir: str) -> str:
