@@ -645,6 +645,46 @@ def verify_v14_extraction(extraction: dict) -> list[dict]:
                     "description": f"references pin {v!r} which is not present in base.pinout ({sorted(pin_nums)})",
                 })
 
+    # 4b. absolute_max placement sniff — flag entries whose evidence.section
+    # looks like an operating-point / characterization table. Catches the
+    # "Table 2 electrical characteristics stuffed into absolute_max" failure
+    # mode observed on USBLC6-2SC6 (SacMap rev2 first-project review,
+    # 2026-05-19). Uses a denylist for known operating-point markers; a
+    # section that contains stress markers ("absolute"/"stress"/"maximum
+    # ratings") is allowed through even if it also contains operating
+    # words (combined tables). Default is silent-pass on ambiguous names.
+    _op_marker_re = re.compile(
+        r'\b(electrical\s+characteristic|operating\s+condition|recommended\s+operating|dc\s+characteristic|ac\s+characteristic)',
+        re.IGNORECASE,
+    )
+    _stress_marker_re = re.compile(
+        r'\b(absolute|stress|maximum\s+rating)',
+        re.IGNORECASE,
+    )
+    for key, sv_list in (abs_max or {}).items():
+        if not isinstance(sv_list, list):
+            continue
+        for j, sv in enumerate(sv_list):
+            if not isinstance(sv, dict):
+                continue
+            evidence = sv.get("evidence") or {}
+            section = (evidence.get("section") or "").strip()
+            if not section:
+                continue  # no evidence to sniff — silent skip
+            looks_operating = bool(_op_marker_re.search(section))
+            looks_stress = bool(_stress_marker_re.search(section))
+            if looks_operating and not looks_stress:
+                issues.append({
+                    "path": f"base.absolute_max.{key}[{j}].evidence.section",
+                    "severity": "warning",
+                    "description": (
+                        f"absolute_max entry cites section {section!r}, which "
+                        "looks like operating-point / characterization data "
+                        "(no 'absolute'/'stress'/'maximum rating' keywords). "
+                        "May be placed in the wrong slot."
+                    ),
+                })
+
     # 5. categories array consistency
     cats = extraction.get("categories") or []
     for cat in cats:
