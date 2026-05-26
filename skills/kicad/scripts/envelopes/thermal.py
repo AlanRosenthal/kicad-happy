@@ -37,8 +37,11 @@ class ThermalSummary:
         "description": "Findings suppressed by project config."})
     by_severity: BySeverity = field(metadata={
         "description": "Breakdown by severity bucket."})
-    thermal_score: float = field(metadata={
-        "description": "Composite thermal risk score, 0-100."})
+    thermal_score: Optional[float] = field(metadata={
+        "description": "Composite thermal risk score, 0-100. None when no "
+                       "components were assessable (see skipped_reason) — a "
+                       "100/100 default in that case would falsely suggest a "
+                       "clean thermal pass (F3)."})
     total_board_dissipation_w: float = field(metadata={
         "description": "Sum of estimated dissipation (W) across all analyzed components."})
     components_analyzed: int = field(metadata={
@@ -53,6 +56,11 @@ class ThermalSummary:
     hottest_component: Optional[ThermalHottest] = field(default=None, metadata={
         "description": "Hottest analyzed component by estimated Tj. "
                        "Omitted when no components were assessed."})
+    skipped_reason: Optional[str] = field(default=None, metadata={
+        "description": "Why thermal scoring was skipped (thermal_score is "
+                       "None). Present only when no components could be "
+                       "assessed — e.g., missing MPNs or no datasheet "
+                       "extraction cache. F3."})
 
 
 @dataclass

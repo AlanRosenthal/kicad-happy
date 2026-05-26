@@ -743,6 +743,22 @@ def compute_thermal_score(findings: list) -> int:
     return max(0, min(100, 100 - penalty))
 
 
+_NO_COMPONENTS_REASON = (
+    "No components had quantifiable power dissipation data "
+    "(missing MPNs or no datasheet extraction cache)"
+)
+
+
+def _resolve_score(findings: list, assessments: list):
+    """Return (score, skipped_reason). Score is None when no components were
+    assessable — a 100/100 default in that case would falsely suggest a clean
+    thermal pass when the analyzer had no data to evaluate (F3)."""
+    if not assessments:
+        return None, _NO_COMPONENTS_REASON
+    return compute_thermal_score(
+        [f for f in findings if not f.get("suppressed")]), None
+
+
 # ---------------------------------------------------------------------------
 # Board thermal summary
 # ---------------------------------------------------------------------------
@@ -792,8 +808,12 @@ def format_text_report(result: dict) -> str:
     lines.append("=" * 60)
     lines.append("")
 
-    score = summary.get("thermal_score", 0)
-    lines.append(f"Thermal score:   {score}/100")
+    score = summary.get("thermal_score")
+    if score is None:
+        reason = summary.get("skipped_reason") or "no components analyzed"
+        lines.append(f"Thermal score:   SKIPPED ({reason})")
+    else:
+        lines.append(f"Thermal score:   {score}/100")
     lines.append(f"Ambient temp:    {summary.get('ambient_c', 25)}°C")
     total_p = summary.get("total_board_dissipation_w", 0)
     lines.append(f"Total dissipation: {total_p:.3f}W")
@@ -1033,9 +1053,10 @@ def main():
     except NameError:
         pass  # project_config not available
 
-    # Score (only active findings)
-    score = compute_thermal_score(
-        [f for f in findings if not f.get("suppressed")])
+    # Score (only active findings). Returns (None, reason) when no components
+    # were assessable, so a missing-data run reports "skipped" rather than a
+    # misleading 100/100 (F3).
+    score, skipped_reason = _resolve_score(findings, assessments)
 
     # Severity counts over the rule findings (thermal_assessments are
     # merged into findings[] further down and contribute info-level
@@ -1085,6 +1106,7 @@ def main():
             # per-severity aliases were removed in v1.3 Batch 20).
             "by_severity": dict(counts),
             "thermal_score": score,
+            **({"skipped_reason": skipped_reason} if skipped_reason else {}),
             **board,
         },
         "findings": findings,
@@ -1133,13 +1155,15 @@ def main():
             out_path = os.path.join(current[0], filename)
         else:
             out_path = os.path.join(analysis_dir, filename)
+        score_str = "SKIPPED" if score is None else f"{score}/100"
         print(f"Thermal analysis complete: {len(findings)} findings "
-              f"(score {score}/100) -> {out_path}", file=sys.stderr)
+              f"(score {score_str}) -> {out_path}", file=sys.stderr)
     elif output_path:
         with open(output_path, "w") as f:
             json.dump(result, f, indent=2)
+        score_str = "SKIPPED" if score is None else f"{score}/100"
         print(f"Thermal analysis complete: {len(findings)} findings "
-              f"(score {score}/100) -> {output_path}", file=sys.stderr)
+              f"(score {score_str}) -> {output_path}", file=sys.stderr)
     elif args.text:
         if args.audience:
             from output_filters import format_text
