@@ -5239,6 +5239,83 @@ def audit_sourcing_gate(components: list[dict]) -> list[dict]:
     return findings
 
 
+def audit_dnp_rate(components: list[dict]) -> list[dict]:
+    """Emit BL-001 when DNP coverage is high enough to make the BOM
+    effectively empty.
+
+    The SS-001..003 sourcing rules filter to non-DNP components first, so
+    a 100%-DNP BOM passes them silently — but a reviewer skimming "no
+    SS-* findings" might miss that no parts will actually be placed by
+    assembly. BL-001 surfaces that explicitly.
+
+    Tiers:
+      ≥90% DNP  →  severity=error    ("assembly cannot place this BOM")
+      ≥50% DNP  →  severity=warning  ("most parts marked DNP — confirm")
+      <50% DNP  →  no finding (DNP-by-variant is a normal pattern)
+
+    A single-component schematic doesn't fire — BL-001's value is on full
+    assemblies, not on one-component drafts.
+    """
+    real = [c for c in components
+            if c.get("type") not in ("power_symbol", "power_flag", "flag",
+                                     "test_point", "mounting_hole",
+                                     "fiducial", "graphic")
+            and c.get("in_bom")]
+    if len(real) < 2:
+        return []
+    dnp_count = sum(1 for c in real if c.get("dnp"))
+    total = len(real)
+    pct = dnp_count / total * 100.0
+    if pct < 50.0:
+        return []
+    if pct >= 90.0:
+        sev = "error"
+        headline = (
+            f"BOM is effectively empty: {dnp_count}/{total} ({pct:.0f}%) "
+            "components are marked DNP — no parts will be placed by assembly."
+        )
+        impact = ("Pre-fab gate: the BOM as-is cannot be sent to an assembly "
+                  "house. Confirm whether this is the intended stuffing variant.")
+    else:
+        sev = "warning"
+        headline = (
+            f"High DNP rate: {dnp_count}/{total} ({pct:.0f}%) components marked "
+            "DNP. Confirm intended stuffing variant before fab."
+        )
+        impact = ("Most components are flagged DNP — likely a no-stuff variant "
+                  "or an in-progress BOM. Confirm before assembly.")
+    dnp_refs = sorted(c.get("reference", "") for c in real if c.get("dnp"))
+    return [{
+        "detector": "audit_dnp_rate",
+        "rule_id": "BL-001",
+        "severity": sev,
+        "confidence": "deterministic",
+        "evidence_source": "bom",
+        "category": "sourcing",
+        "summary": headline,
+        "description": (
+            f"Audited {total} non-fixture BOM components; {dnp_count} are "
+            f"marked DNP ({pct:.1f}%). The DNP flag tells the assembly "
+            "house to skip a component — at this rate the resulting board "
+            "would be largely unpopulated."),
+        "components": dnp_refs[:50],
+        "nets": [],
+        "pins": [],
+        "dnp_rate_percent": round(pct, 1),
+        "dnp_count": dnp_count,
+        "total_components": total,
+        "recommendation": (
+            "If this BOM is for a no-stuff stuffing variant, suppress BL-001 "
+            "via project config. Otherwise clear the DNP flag on components "
+            "that should be assembled."),
+        "report_context": {
+            "section": "Sourcing",
+            "impact": impact,
+            "standard_ref": "",
+        },
+    }]
+
+
 # Generic transistor symbol prefixes that encode assumed pin order
 _GENERIC_TRANSISTOR_PREFIXES = ("Q_NPN_", "Q_PNP_", "Q_NMOS_", "Q_PMOS_")
 
@@ -8929,6 +9006,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
     datasheet_coverage_findings = audit_datasheet_coverage(
         all_components, str(Path(path).parent))
     sourcing_gate_findings = audit_sourcing_gate(all_components)
+    dnp_rate_findings = audit_dnp_rate(all_components)
     alternate_pins = summarize_alternate_pins(all_lib_symbols)
     ground_domains = classify_ground_domains(nets, all_components)
     bus_topology = analyze_bus_topology(merged_bus, all_labels, nets)
@@ -9057,6 +9135,9 @@ def analyze_schematic(path: str, project_root: str | None = None,
 
     if sourcing_gate_findings:
         findings.extend(sourcing_gate_findings)
+
+    if dnp_rate_findings:
+        findings.extend(dnp_rate_findings)
 
     # NT-001 — single-pin nets weighted by pin type (Task 3)
     nt_findings = connectivity_issues.get("single_pin_net_findings", [])
