@@ -34,6 +34,8 @@ description: >-
 
 **Handoff guidance:** Use this skill to parse schematics/PCBs and extract structured data. Hand off to `bom` for BOM enrichment, pricing, and ordering. Hand off to `digikey`/`mouser`/`lcsc`/`element14` for part searches and datasheet fetching. Hand off to `jlcpcb`/`pcbway` for fabrication ordering and DFM rule validation. **Always run `spice`** for simulation verification during design reviews when any SPICE simulator is installed (check with `which ngspice ltspice xyce`). **Always run `emc`** for EMC pre-compliance risk analysis during design reviews when both schematic and PCB analysis are available. These are not optional — skipping them leaves value-computation errors and EMC risks undetected.
 
+**Sister-skill paths:** Each skill named above lives at `<sister-skill-path>/SKILL.md`, with scripts at `<sister-skill-path>/scripts/<script>.py`. The kicad skill's own scripts live at `<skill-path>/scripts/`. When invoking a sister skill's script (e.g., the `emc` skill's `analyze_emc.py`, the `digikey` skill's `sync_datasheets_digikey.py`), use the sister-skill path — not the kicad skill's `<skill-path>/scripts/`. Agent-host paths vary across Claude Code / Codex / opencode / Gemini; the placeholder convention is platform-portable.
+
 **Before analysis:** When the user asks to analyze or review a KiCad project, check whether a `datasheets/` directory exists in the project. If not, and DigiKey API keys are available (`DIGIKEY_CLIENT_ID`), offer to sync datasheets first: "I can download datasheets for your components before analysis — this enables pin-level verification and decoupling validation against manufacturer specs. Want me to sync them?" If the user declines or no API keys are set, proceed without datasheets — the analysis works without them but datasheet verification findings won't be available.
 
 **If you see a `DS-001` finding in the analyzer output** (severity `high`, detector `audit_datasheet_coverage`), no analyzer-derived claim about an *unverified part* can be reported as verified. Stop and either (a) run the datasheet sync via `digikey` / `mouser` / `lcsc` / `element14` (whichever has credentials/stock), (b) populate MPNs on the BOM parts, or (c) state explicitly in the report that every pin-level, electrical, and regulator finding *for parts without datasheet evidence* is *consistency only*. **Trust-language guard is per-part, not per-report.** Claims about specific parts you manually verified against a PDF datasheet — cite the page/section/figure number — remain valid even when DS-001 is open for other parts. Words like "verified", "confirmed", or "per datasheet" are appropriate for parts with explicit citation evidence, and inappropriate for parts where the analyzer ran without datasheet input. `DS-002` (datasheets missing but MPNs set) and `DS-003` (partial MPN coverage) are softer variants with the same per-part implication.
@@ -132,6 +134,7 @@ output by hand:
 | Power net routing | `pcb.power_net_routing` is a **list** of per-net entries `[{net, track_count, total_length_mm, ...}, ...]`, not a dict keyed by net. | `power_net_routing["VCC"]` → TypeError |
 | IC pin analysis | `schematic.ic_pin_analysis` is a **list** of IC entries (each with `.reference` and `.pins[]`), not a dict keyed by ref. | `ic_pin_analysis["U1"]` → TypeError |
 | Findings | `findings[]` flat list — each has `rule_id`, `detector`, `severity`, `summary`, `report_context`. Filter with `finding_schema.get_findings(data, Det.*)` or `group_findings(data)` | Looking for keyed dicts like `signal_analysis.power_regulators[]` (pre-v1.3 format, removed) |
+| Capability-mode pointer | `capability_mode_ref` is a top-level `{source, run_id}` dict pointing at `analysis/capability_mode.json` — records which detection rules were enabled for the run. Safe to ignore unless writing meta-tooling or auditing a corpus regression. | Treating it as a findings section or an analyzer status block — it's neither |
 
 This prevents format-string bugs and wrong field names. Use f-strings or `json.dumps()` for output formatting — never `%s` with non-string types. See `references/output-schema.md` for the full schema with common extraction patterns.
 
@@ -249,9 +252,25 @@ python3 <skill-path>/scripts/cross_analysis.py \
 
 Checks: CC-001 connector current capacity, EG-001 ESD protection gaps, DA-001 decoupling adequacy, XV-001..003 schematic/PCB sync. PCB JSON optional.
 
+### Mechanical Cross-Verify (`cross_verify.py`)
+
+A companion script that correlates schematic intent with PCB physical implementation across six mechanical checks: component-reference matching, differential-pair length, power-trace width vs current, decoupling placement, bus routing skew, and (optionally) thermal-via adequacy. Complements `cross_analysis.py` (rule-based findings) with structured pass/warn/fail per check.
+
+```bash
+# Mechanical consistency check (separate from cross_analysis.py)
+python3 <skill-path>/scripts/cross_verify.py \
+    --schematic schematic.json --pcb pcb.json --output cross_verify.json
+
+# With thermal cross-check
+python3 <skill-path>/scripts/cross_verify.py \
+    --schematic schematic.json --pcb pcb.json --thermal thermal.json
+```
+
+Useful as the mechanical half of "verify after every run" — the symbol-vs-PCB consistency layer that doesn't need datasheet PDFs. Run after the regular cross-domain analyzer when reviewing a PR or pre-fab snapshot.
+
 ### Connectivity Graph (--full mode)
 
-When `--full` is used with the PCB analyzer, the output includes a `connectivity_graph` section with per-net copper connectivity analysis via union-find over pads, tracks, vias, and zone fills. This enables deterministic plane split detection and return path validation in cross_analysis.py. Each net entry shows island count, component-to-island mapping, gap locations, and disconnected pad pairs.
+When `--full` is used with the PCB analyzer, the output includes a `connectivity_graph` section with per-net copper connectivity analysis via union-find over pads, tracks, vias, and zone fills. This enables deterministic plane split detection and return path validation in cross_analysis.py. **The top-level keys of `connectivity_graph` are net names themselves** — e.g., `cg['GND']`, `cg['Net-(D2-K)']`, `cg['+3V3']` — *not* a `per_net` wrapper. Each net entry shows island count, component-to-island mapping (`{component:pad: island_id}`), gap locations, and disconnected pad pairs.
 
 ### Gerber & Drill Analyzer
 ```bash
