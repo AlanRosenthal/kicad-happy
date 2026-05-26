@@ -3418,6 +3418,7 @@ _EDGE_MOUNT_LIBRARY_KEYWORDS = (
     'BarrelJack',                         # DC barrel jack at edge
     'Standoff', 'Mounting',               # mounting features near edge are intentional
     'TerminalBlock',                      # screw terminals at board edge
+    'Phoenix_MSTB',                       # Phoenix MSTB/MSTBA/MSTBVA terminal-block family (F8)
     'JST_', 'Molex_PicoBlade',            # edge-launched JST/Molex wire-to-board
 )
 _EDGE_MOUNT_VALUE_KEYWORDS = (
