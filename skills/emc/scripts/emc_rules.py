@@ -1297,10 +1297,16 @@ def check_stackup(pcb: Dict) -> List[Dict]:
         t1 = layer_type_map.get(l1['name'], 'signal')
         t2 = layer_type_map.get(l2['name'], 'signal')
 
-        # Two adjacent signal layers with no ground/power between them
+        # Two adjacent signal layers with no ground/power between them.
+        # F9: severity scales by copper-layer count — on a 2-layer board
+        # the designer can't insert a reference plane in this revision
+        # (the issue is a stackup choice, not a fixable defect), so demote
+        # to info with a "consider 4-layer next revision" recommendation.
+        # 3+ layers: designer has real reorder options, keep HIGH.
         if t1 == 'signal' and t2 == 'signal':
+            two_layer = len(copper_layers) <= 2
             findings.append(_make_finding(
-                'stackup', 'HIGH', 'SU-001',
+                'stackup', 'INFO' if two_layer else 'HIGH', 'SU-001',
                 title=f'Adjacent signal layers: {l1["name"]}, {l2["name"]}',
                 description=(
                     f'Signal layers {l1["name"]} and {l2["name"]} are adjacent '
@@ -1308,6 +1314,9 @@ def check_stackup(pcb: Dict) -> List[Dict]:
                     f'crosstalk and poor return path control for signals on both layers.'
                 ),
                 recommendation=(
+                    'Consider a 4-layer stackup with internal reference planes '
+                    'for the next revision if signal integrity or EMC issues arise.'
+                    if two_layer else
                     'Reorder stackup to place a ground or power plane between '
                     'every pair of signal layers.'
                 ),
