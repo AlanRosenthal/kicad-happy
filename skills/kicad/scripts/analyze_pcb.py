@@ -5178,6 +5178,15 @@ def analyze_thermal_pad_vias(footprints: list[dict], vias: dict,
     return results
 
 
+# Generic-passive reference designators (C, R, L, FB + digits, optionally
+# with a hierarchical sheet prefix like "U1/C5"). F10: CP-002 skips these
+# because on a 2-layer board with a GND pour every decoupling cap's VCC
+# pad is "uncovered" — that's expected, not a finding. Components on real
+# touch / antenna pads use TP-prefixed refs or non-passive libraries and
+# are surfaced via CP-003.
+_PASSIVE_REF_RE = re.compile(r"^([A-Za-z0-9_]+/)?(C|R|L|FB)\d+$")
+
+
 def analyze_copper_presence(footprints: list[dict], zones: list[dict],
                             zone_fills: ZoneFills,
                             ref_layer_map: dict[str, str] | None = None) -> dict:
@@ -5336,31 +5345,39 @@ def analyze_copper_presence(footprints: list[dict], zones: list[dict],
         "opposite_layer_summary": opp_summary,
     }
 
-    # The interesting signal: components WITHOUT opposite-layer copper
+    # The interesting signal: components WITHOUT opposite-layer copper.
+    # F10: emit CP-002 findings only for non-passive references — on a
+    # 2-layer board with a GND pour on the opposite side, every decoupling
+    # cap's VCC pad would otherwise fire CP-002, drowning the info tier.
+    # Actual touch-sensitive / RF components are still surfaced via CP-003.
+    # The summary list (`no_opposite_layer_copper`) keeps everything so
+    # consumers that want the raw uncovered set still have it.
     if opp_uncovered:
         result["no_opposite_layer_copper"] = sorted(opp_uncovered)
-        result["no_opposite_layer_copper_findings"] = [{
-            "component": _ref,
-            "detector": "analyze_copper_presence",
-            "rule_id": "CP-002",
-            "category": "copper_integrity",
-            "severity": "info",
-            "confidence": "deterministic",
-            "evidence_source": "geometry",
-            "summary": f"No opposite-layer copper under {_ref}",
-            "description": (
-                f"Component {_ref} has no copper zone on the opposite layer."
-            ),
-            "components": [_ref],
-            "nets": [],
-            "pins": [],
-            "recommendation": "",
-            "report_context": {
-                "section": "Copper Integrity",
-                "impact": "Return path / shielding",
-                "standard_ref": "",
-            },
-        } for _ref in sorted(opp_uncovered)]
+        cp_002_refs = [r for r in opp_uncovered if not _PASSIVE_REF_RE.match(r)]
+        if cp_002_refs:
+            result["no_opposite_layer_copper_findings"] = [{
+                "component": _ref,
+                "detector": "analyze_copper_presence",
+                "rule_id": "CP-002",
+                "category": "copper_integrity",
+                "severity": "info",
+                "confidence": "deterministic",
+                "evidence_source": "geometry",
+                "summary": f"No opposite-layer copper under {_ref}",
+                "description": (
+                    f"Component {_ref} has no copper zone on the opposite layer."
+                ),
+                "components": [_ref],
+                "nets": [],
+                "pins": [],
+                "recommendation": "",
+                "report_context": {
+                    "section": "Copper Integrity",
+                    "impact": "Return path / shielding",
+                    "standard_ref": "",
+                },
+            } for _ref in sorted(cp_002_refs)]
 
     if foreign_zone_details:
         result["same_layer_foreign_zones"] = foreign_zone_details
