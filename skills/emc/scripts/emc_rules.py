@@ -742,8 +742,19 @@ def check_connector_filtering(pcb: Dict, schematic: Optional[Dict] = None) -> Li
             # amps DC input would burn. The right answer for power cabling is
             # a system-level common-mode choke or shielded cable with chassis
             # termination. Downgrade severity + reword the recommendation.
-            all_pad_nets = [p.get('net_name', '') for p in conn.get('pads', [])
-                            if p.get('net_name')]
+            #
+            # The PCB analyzer strips per-pad geometry from output; the
+            # consumer-visible field is `pad_nets`
+            # ({pad_num: {net: name, pin: num}}) — same field IO-002 reads
+            # at line 803. Reading `pads` (the parser-internal field) returns
+            # [] and silently no-ops the gate. Verified against harness
+            # fixtures Tropaion/ZigBee_SmartMeter_Reader and
+            # diondokter/induction-heater.
+            pad_nets = conn.get('pad_nets', {})
+            all_pad_nets = [
+                v.get('net', '') for v in pad_nets.values()
+                if isinstance(v, dict) and v.get('net')
+            ]
             power_only = (
                 bool(all_pad_nets)
                 and all(_is_power_or_ground(n) for n in all_pad_nets)
