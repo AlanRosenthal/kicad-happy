@@ -106,7 +106,8 @@ Output of `python3 skills/kicad/scripts/analyze_schematic.py <file>.kicad_sch`.
 | `components` | `list[dict]` | yes | Every non-power component as a dict. Shape is effectively open: reference/value/lib_id/footprint/datasheet/description/mpn/manufacturer/distributor SKUs/geometry/uuid/type/parsed_value plus internal bookkeeping (_sheet, pin_nets, pin_uuids). Tightens to a typed Component in v1.5. |
 | `nets` | `dict[str, NetEntry]` | yes | Net connectivity map keyed by net name. |
 | `subcircuits` | `list[dict]` | yes | Hierarchical sub-sheets: [{reference, path, sheet_name, sheet_file, instances}]. |
-| `ic_pin_analysis` | `list[dict]` | yes | Per-IC pin mappings. Each entry carries reference, value, type, lib_id, mpn, description, datasheet, function, total_pins, unconnected_pins, pins[], power_pins[], signal_pins[], decoupling_caps_by_rail. |
+| `ic_pin_analysis` | `list[dict]` | yes | Per-IC pin mappings. Each entry carries reference, value, type, lib_id, mpn, description, datasheet, function, total_pins, unconnected_pins, pins[], power_pins[], signal_pins[], decoupling_caps_by_rail. Covers type in {ic, connector, crystal, oscillator}; transistors live in transistor_pin_analysis[] (F4). |
+| `transistor_pin_analysis` | `list[dict]` | yes | Per-transistor pin mappings. Same shape as ic_pin_analysis entries but filtered to type=transistor (MOSFETs, BJTs, FETs). Lets bridge / half-bridge / gate-driver reviewers verify gate/source/drain wiring without reconstructing pin maps from nets[].pins[] by hand. F4. |
 | `design_analysis` | `dict` | yes | Design-level analyses: net_classification, power_domains, cross_domain_signals, bus_analysis (i2c/spi/uart/can), differential_pairs, erc_warnings, passive_warnings. |
 | `connectivity_issues` | `dict` | yes | Connectivity issue lists: single_pin_nets, single_pin_net_findings, multi_driver_nets, unconnected_pins, power_net_summary. |
 | `annotation_issues` | `dict` | yes | Annotation issue bag: duplicate_references, unannotated, missing_value, zero_indexed_refs. |
@@ -177,8 +178,6 @@ Output of `python3 skills/kicad/scripts/analyze_pcb.py <file>.kicad_pcb`.
 | `statistics` | `PCBStatistics` | yes | Board/component/net counts and routing rollup. |
 | `setup` | `PCBSetup` | yes | Board setup block (thickness, soldermask, etc.). |
 | `board_outline` | `BoardOutline` | yes | Edge.Cuts outline geometry + bounding box. |
-| `board_thickness_mm` | `float` | yes | Stackup thickness (mm); duplicated from setup for downstream consumers. |
-| `board_metadata` | `dict` | yes | Board metadata bag (paper size, title block fragments, etc.). |
 | `connectivity` | `Connectivity` | yes | Routing completeness rollup. |
 | `tracks` | `Tracks` | yes | Track summary + optional detailed arrays under --full. |
 | `vias` | `Vias` | yes | Via summary + optional detailed array under --full. |
@@ -190,14 +189,16 @@ Output of `python3 skills/kicad/scripts/analyze_pcb.py <file>.kicad_pcb`.
 | `keepout_zones` | `list[dict]` | yes | Keepout zones: [{name, layers, restrictions, bounding_box, area_mm2, nearby_components}]. |
 | `net_classes` | `list[dict]` | yes | Net class definitions: [{name, clearance, track_width, via_diameter, via_drill}]. |
 | `net_lengths` | `list[dict]` | yes | Per-net track length rollup: [{net, net_number, total_length_mm, segment_count, via_count, layers}]. |
-| `power_net_routing` | `list[dict]` | yes | Power net routing rollup: [{net, track_count, total_length_mm, min_width_mm, max_width_mm, widths_used}]. |
 | `component_groups` | `dict[str, ComponentGroup]` | yes | Refdes prefix -> {count, references}. |
-| `ground_domains` | `dict` | yes | Ground topology: domain_count, domains[], multi_domain_components. |
 | `silkscreen` | `dict` | yes | Silkscreen rollup: board_text_count, refs_visible_on_silk, refs_hidden_on_silk, documentation_warnings[], fab_notes_completeness, silkscreen_completeness. |
-| `placement_density` | `dict` | yes | Placement density: board_area_cm2, front_density_per_cm2, optional back_density_per_cm2. |
 | `dfm_summary` | `dict` | yes | DFM rollup: dfm_tier, metrics, violation_count. |
-| `design_rule_compliance` | `dict` | yes | Design rule compliance: compliant, rules_checked, rules_source. |
 | `project_settings` | `dict` | yes | Selected settings extracted from .kicad_pro: source, net_classes, design_rules. |
+| `design_rule_compliance` | `dict` | no | Design rule compliance: compliant, rules_checked, rules_source; empty dict when project_settings missing or compliance not computed. TH-043. |
+| `board_thickness_mm` | `float \| null` | no | Stackup thickness (mm); duplicated from setup for downstream consumers. Null when the source file has no (general (thickness ...)) entry. TH-043. |
+| `board_metadata` | `dict` | no | Board metadata bag (paper size, title block fragments, etc.); empty dict when no metadata extracted. TH-043. |
+| `power_net_routing` | `list[dict]` | no | Power net routing rollup: [{net, track_count, total_length_mm, min_width_mm, max_width_mm, widths_used}]; empty list when no power routing detected. TH-043-residual. |
+| `ground_domains` | `dict` | no | Ground topology: domain_count, domains[], multi_domain_components. Always emitted; domain_count=0 is meaningful (no ground domain found). TH-043-residual. |
+| `placement_density` | `dict` | no | Placement density: board_area_cm2, front_density_per_cm2, optional back_density_per_cm2; empty dict when density not computed. TH-043-residual. |
 | `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views; only present when output filters ran. |
 | `design_intent` | `dict \| null` | no | Resolved design intent: product_class, ipc_class, target_market, operating_temp_range, preferred_passive_size, test_coverage_target, approved_manufacturers, expected_lifetime_years, detection_signals, confidence, source. |

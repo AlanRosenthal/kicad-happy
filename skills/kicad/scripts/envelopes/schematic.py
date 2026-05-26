@@ -223,7 +223,16 @@ class SchematicEnvelope:
         "description": "Per-IC pin mappings. Each entry carries reference, "
                        "value, type, lib_id, mpn, description, datasheet, "
                        "function, total_pins, unconnected_pins, pins[], "
-                       "power_pins[], signal_pins[], decoupling_caps_by_rail."})
+                       "power_pins[], signal_pins[], decoupling_caps_by_rail. "
+                       "Covers type in {ic, connector, crystal, oscillator}; "
+                       "transistors live in transistor_pin_analysis[] (F4)."})
+    transistor_pin_analysis: list[dict] = field(metadata={
+        "description": "Per-transistor pin mappings. Same shape as "
+                       "ic_pin_analysis entries but filtered to "
+                       "type=transistor (MOSFETs, BJTs, FETs). Lets bridge / "
+                       "half-bridge / gate-driver reviewers verify "
+                       "gate/source/drain wiring without reconstructing pin "
+                       "maps from nets[].pins[] by hand. F4."})
 
     # --- Analysis bags (free-form dicts; shapes tighten per rule_id in v1.5) ---
     design_analysis: dict = field(metadata={

@@ -1941,7 +1941,8 @@ def _classify_ic_function(lib_id: str, value: str, description: str) -> str:
     return ""
 
 
-def analyze_ic_pinouts(ctx: AnalysisContext) -> list[dict]:
+def analyze_ic_pinouts(ctx: AnalysisContext,
+                       target_types: set[str] | None = None) -> list[dict]:
     """Analyze each IC's pinout for datasheet cross-referencing.
 
     For every IC, produces a detailed per-pin analysis showing:
@@ -1967,8 +1968,13 @@ def analyze_ic_pinouts(ctx: AnalysisContext) -> list[dict]:
 
     results = []
 
-    # Analyze ICs and other complex components (connectors, crystals, oscillators, etc.)
-    target_types = {"ic", "connector", "crystal", "oscillator"}
+    # Analyze ICs and other complex components (connectors, crystals, oscillators, etc.).
+    # target_types is parameterised so the same code path can build a parallel
+    # transistor_pin_analysis[] (F4) — verifying gate/source/drain wiring on
+    # half-bridges is one of the highest-value review tasks and previously
+    # required reconstructing the pin map from nets[].pins[] by hand.
+    if target_types is None:
+        target_types = {"ic", "connector", "crystal", "oscillator"}
     target_components = [c for c in components if c["type"] in target_types]
 
     for ic in target_components:
@@ -8893,6 +8899,10 @@ def analyze_schematic(path: str, project_root: str | None = None,
 
     # Detailed IC pinout analysis for datasheet cross-referencing
     ic_analysis = analyze_ic_pinouts(ctx)
+    # Parallel transistor pinout analysis (F4) — same code path, different
+    # filter. ic_pin_analysis stays IC/connector/crystal/oscillator-only for
+    # consumer compatibility; transistors go in their own array.
+    transistor_analysis = analyze_ic_pinouts(ctx, target_types={"transistor"})
 
     # Analyze connectivity for issues
     connectivity_issues = analyze_connectivity(all_components, nets, all_no_connects)
@@ -9092,6 +9102,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
         "nets": nets,
         "subcircuits": subcircuits,
         "ic_pin_analysis": ic_analysis,
+        "transistor_pin_analysis": transistor_analysis,
         "design_analysis": design_analysis,
         "connectivity_issues": connectivity_issues,
         "labels": all_labels,
