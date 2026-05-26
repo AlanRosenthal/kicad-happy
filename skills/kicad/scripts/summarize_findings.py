@@ -146,6 +146,36 @@ def _filter_severity(findings: list[dict], severity: str | None) -> list[dict]:
     return [f for f in findings if _norm(f.get("severity", "info")) == want]
 
 
+# F16: per-finding trust filters. Vocabulary comes from finding_schema's
+# VALID_CONFIDENCES / VALID_EVIDENCE_SOURCES — kept inline to avoid an
+# import (summarize_findings is intentionally dependency-light).
+_KNOWN_CONFIDENCES = frozenset(
+    ("deterministic", "heuristic", "datasheet_backed"))
+_KNOWN_EVIDENCE_SOURCES = frozenset(
+    ("topology", "datasheet", "heuristic_rule", "simulation",
+     "user_config", "geometry", "lookup", "bom"))
+
+
+def _filter_confidence(findings: list[dict], confidence: str | None) -> list[dict]:
+    if not confidence:
+        return findings
+    if confidence not in _KNOWN_CONFIDENCES:
+        raise SystemExit(
+            f"error: unknown --confidence {confidence!r} — "
+            f"accepted: {', '.join(sorted(_KNOWN_CONFIDENCES))}")
+    return [f for f in findings if f.get("confidence") == confidence]
+
+
+def _filter_evidence_source(findings: list[dict], src: str | None) -> list[dict]:
+    if not src:
+        return findings
+    if src not in _KNOWN_EVIDENCE_SOURCES:
+        raise SystemExit(
+            f"error: unknown --evidence-source {src!r} — "
+            f"accepted: {', '.join(sorted(_KNOWN_EVIDENCE_SOURCES))}")
+    return [f for f in findings if f.get("evidence_source") == src]
+
+
 def _aggregate(findings: list[dict]) -> list[dict]:
     groups: dict[tuple, dict] = defaultdict(
         lambda: {"rule_id": "", "severity": "info", "count": 0,
@@ -261,6 +291,16 @@ def main(argv: list[str] | None = None) -> int:
                           "of: high/critical/error (all → high), "
                           "warning/medium/warn (→ warning), info. "
                           "Raises if the value is unrecognised."))
+    ap.add_argument("--confidence",
+                    help=("Filter to a single confidence level (F16). "
+                          "Accepts: deterministic, heuristic, "
+                          "datasheet_backed. Combines with --severity / "
+                          "--evidence-source via AND."))
+    ap.add_argument("--evidence-source",
+                    help=("Filter to a single evidence_source (F16). "
+                          "Accepts: topology, datasheet, heuristic_rule, "
+                          "simulation, user_config, geometry, lookup, bom. "
+                          "Combines with --severity / --confidence via AND."))
     ap.add_argument("--run",
                     help="Run ID override (defaults to manifest.current).")
     ap.add_argument("--json", action="store_true",
@@ -276,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
     run_dir, run_id, manifest_version = _resolve_run_dir(args.analysis_dir, args.run)
     findings = _collect_findings(run_dir, only_deterministic=args.only_deterministic)
     findings = _filter_severity(findings, args.severity)
+    findings = _filter_confidence(findings, args.confidence)
+    findings = _filter_evidence_source(findings, args.evidence_source)
     assessments_by_rule = _collect_assessments(run_dir, only_deterministic=args.only_deterministic)
     assessment_total = sum(assessments_by_rule.values())
     if args.by_confidence:
