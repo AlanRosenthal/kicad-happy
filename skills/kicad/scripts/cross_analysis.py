@@ -794,36 +794,38 @@ _DIFF_PAIR_SUFFIXES = [
 
 
 def _find_diff_pairs(net_names, schematic):
+    """Return pairs of net names that are explicitly marked differential.
+
+    F7: The previous implementation had a suffix-only fallback loop that
+    paired any nets matching `<base>P`/`<base>N` regardless of whether the
+    schematic analyzer had identified them as a real differential interface.
+    On gate-driver designs (INH/INL, HIN/LIN) and op-amp current-sense
+    circuits (OUTP/OUTN, INP/INN) this fired DP-005 on every conventional
+    naming pair. The fallback is gone — DP-005 now only fires when
+    ``schematic['net_classifications'][<net>]['differential']`` is True
+    for both endpoints. Conservative loss: any genuine diff pair the
+    schematic analyzer failed to classify won't get a DP-005 finding.
+    But every real differential interface (USB / LVDS / Ethernet / HDMI /
+    CAN / etc.) is already classified by `_build_net_classifications`, so
+    the loss is small relative to the false-positive reduction.
+    """
     pairs = []
+    if not schematic:
+        return pairs
+    classifications = schematic.get('net_classifications', {})
+    diff_nets = [n for n, c in classifications.items() if c.get('differential')]
+    if not diff_nets:
+        return pairs
     seen = set()
-    if schematic:
-        classifications = schematic.get('net_classifications', {})
-        diff_nets = [n for n, c in classifications.items() if c.get('differential')]
-        for p_pat, n_pat in _DIFF_PAIR_SUFFIXES:
-            for net in diff_nets:
-                if net in seen:
-                    continue
-                m = p_pat.match(net)
-                if m:
-                    base = m.group(1)
-                    for net2 in diff_nets:
-                        if net2 in seen:
-                            continue
-                        m2 = n_pat.match(net2)
-                        if m2 and m2.group(1) == base:
-                            pairs.append((net, net2))
-                            seen.add(net)
-                            seen.add(net2)
-                            break
     for p_pat, n_pat in _DIFF_PAIR_SUFFIXES:
-        for net in net_names:
+        for net in diff_nets:
             if net in seen:
                 continue
             m = p_pat.match(net)
             if m:
                 base = m.group(1)
-                for net2 in net_names:
-                    if net2 in seen or net2 == net:
+                for net2 in diff_nets:
+                    if net2 in seen:
                         continue
                     m2 = n_pat.match(net2)
                     if m2 and m2.group(1) == base:
