@@ -60,7 +60,8 @@ def _is_power_or_ground(name: str) -> bool:
     for prefix in ('gnd', 'vcc', 'vdd', 'vss', 'vee', 'v+', 'v-',
                    '+3v', '+5v', '+12v', '+1v', '+2v', '+24v', '+48v',
                    '3v3', '5v0', '1v8', '1v2', '0v9', '2v5',
-                   'vbat', 'vin', 'vbus', 'vsys', 'vmot', 'vpwr',
+                   'vbat', 'vin', 'vbus', 'vsys', 'vmot', 'vmotor',
+                   'vpwr', 'vm',  # F6: motor supply rails (vm/vmot/vmotor)
                    'avcc', 'avdd', 'dvcc', 'dvdd', 'agnd', 'dgnd',
                    'pgnd', 'earth', 'pwr', 'power'):
         if low == prefix or low.startswith(prefix + '_') or low.startswith(prefix + '/'):
@@ -735,7 +736,31 @@ def check_connector_filtering(pcb: Dict, schematic: Optional[Dict] = None) -> Li
                     is_external = True
                     break
 
-            severity = 'HIGH' if is_external else 'LOW'
+            # F6: power-only-connector gate. If every net at this connector
+            # is a power/ground rail (no signal lines), the IO-001 fix isn't
+            # a board-level ferrite bead — a saturating ferrite on a tens-of-
+            # amps DC input would burn. The right answer for power cabling is
+            # a system-level common-mode choke or shielded cable with chassis
+            # termination. Downgrade severity + reword the recommendation.
+            all_pad_nets = [p.get('net_name', '') for p in conn.get('pads', [])
+                            if p.get('net_name')]
+            power_only = (
+                bool(all_pad_nets)
+                and all(_is_power_or_ground(n) for n in all_pad_nets)
+            )
+            if power_only:
+                severity = 'INFO'
+                recommendation = (
+                    f'{conn_ref} appears to be a power-only connector (all '
+                    f'pins are power/ground rails). A board-level ferrite '
+                    f'bead would saturate at typical power-supply currents. '
+                    f'If radiated EMI is a concern on the cable, add a '
+                    f'system-level common-mode choke or use shielded cable '
+                    f'with chassis termination.'
+                )
+            else:
+                severity = 'HIGH' if is_external else 'LOW'
+                recommendation = _suggest_filtering(conn_ref, combined)
             findings.append(_make_finding(
                 'io_filtering', severity, 'IO-001',
                 title=f'No EMC filtering near {conn_ref}',
@@ -746,7 +771,7 @@ def check_connector_filtering(pcb: Dict, schematic: Optional[Dict] = None) -> Li
                     f'common-mode current as low as 5 µA can exceed FCC Class B.'
                 ),
                 components=[conn_ref],
-                recommendation=_suggest_filtering(conn_ref, combined),
+                recommendation=recommendation,
                 confidence='heuristic',
                 fix_params={
                     'type': 'add_component',
