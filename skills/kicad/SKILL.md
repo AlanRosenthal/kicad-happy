@@ -45,7 +45,7 @@ description: >-
 When the user asks for a **design review**, **complete report**, **ready-to-fab assessment**, or anything equivalent, do not stop at running one or two analyzers and summarizing their findings. A design review in this skill has a stricter contract:
 
 1. Read the full workflow in this `SKILL.md`, not just the analyzer command sections.
-2. Read `references/report-generation.md` before writing the report.
+2. Read `references/report-generation.md` before writing the report. Its "Required Sections for Full Reviews" list is the authoritative, mandatory section set — the inline skeleton later in this file is an orientation stub, not the contract.
 3. Run every applicable analyzer for the files present in the project, then say explicitly which ones were and were not run.
 4. Perform raw-file and datasheet cross-verification before claiming anything is "verified".
 5. Triage likely analyzer false positives before elevating them into blockers.
@@ -69,6 +69,13 @@ For a full design review, explicitly account for each item below in the report:
 - prior review / prior run delta check
 - raw schematic/PCB spot-verification elevated to full verification for critical parts
 - explicit report sections for blockers, verification basis, false positives, and skipped analyses
+- **report covers every required section** — the authoritative, REQUIRED section set lives in `references/report-generation.md` ("Required Sections for Full Reviews"), not in the inline skeleton below. A report that addresses only the inline-skeleton sections is incomplete and will silently drop Power Analysis (PDN, power budget, sequencing, sleep current, inrush, derating), per-detector Signal Analysis, Connector Pin Tables, USB Compliance, and Standards Compliance.
+
+Before claiming a review is complete, run the completeness gate against the finished report — it derives the mandatory sections from the analyzer data actually present and flags any you didn't cover:
+
+```bash
+python3 <skill-path>/scripts/check_report_sections.py --analysis-dir analysis/ --report <your-report.md>
+```
 
 If an item is not applicable, say why. If it was skipped, say why. If it failed, say how that limits confidence.
 
@@ -81,6 +88,7 @@ These are the failure modes this contract is meant to prevent:
 - Claiming "verified" without direct datasheet evidence or structured extraction evidence
 - Omitting thermal, lifecycle, prior-review delta, or gerber checks without disclosure
 - Writing a report that lacks a verdict, blockers table, verification basis, or skipped-analysis notes
+- Writing the report from the inline skeleton alone and leaving present optional analyzer sections (PDN, power budget, sleep current, inrush, USB compliance, standards compliance, per-detector signal analysis) unreported — run `check_report_sections.py` to catch this
 - Reading only the first part of this skill and missing the design-review workflow later in the file
 
 ## PDF Schematic Analysis
@@ -448,7 +456,7 @@ drill_classification, pad_summary, board_dimensions, gerbers, drills
 9. **Read the `.kicad_pro`** project file directly (it's JSON) for design rules, net classes, and DRC/ERC settings.
 10. **Check for prior design reviews** — scan the project directory for existing review files (`*review*.md`, `*design-review*.md`). If found, read the most recent one. If `auto_diff` is enabled and prior runs exist, run `diff_analysis.py` on current vs previous run and include the delta in the "Previous Review Delta" section.
 11. **Verify each output** against the raw files and datasheets before using the data in your report.
-12. **Produce a unified report** covering schematic analysis, PCB layout analysis, cross-domain findings, EMC risk assessment, simulation verification, thermal hotspots, and cross-reference findings. See `references/report-generation.md` for the report template.
+12. **Produce a unified report** covering schematic analysis, PCB layout analysis, cross-domain findings, EMC risk assessment, simulation verification, thermal hotspots, and cross-reference findings. See `references/report-generation.md` for the report template. Before claiming completeness, run `scripts/check_report_sections.py --analysis-dir analysis/ --report <report.md>` and address any missing sections it reports.
 13. **Disclose all review gaps explicitly** — if thermal, lifecycle, gerber, datasheet extraction, or prior-review delta were not performed, add a short "Not performed / limits" section to the report instead of omitting them silently.
 
 The more data sources you combine, the more confident the analysis. A schematic-only review misses layout issues; a PCB-only review misses design intent. Always use everything available.
@@ -909,7 +917,7 @@ Total / unique / DNP / missing-MPN / datasheet-synced %.
 [What the design got right — short bullet list.]
 ```
 
-This skeleton covers the canonical structure; `references/report-generation.md` has the full template, severity definitions, writing principles, domain-specific focus areas, and the per-analyzer output-field reference.
+This skeleton is a stub for orientation only — it is **not** the complete section set. The authoritative, REQUIRED structure is `references/report-generation.md` ("Required Sections for Full Reviews"), which adds the full Power Analysis suite (PDN impedance, power budget, sequencing, sleep current, inrush, derating), per-detector Signal Analysis, Connector Pin Tables, USB Compliance, and Standards Compliance. A report written from this skeleton alone is incomplete. Read that reference, and verify the finished report with `scripts/check_report_sections.py --analysis-dir analysis/ --report <report.md>`.
 
 ### Design Comparison
 When comparing two designs, diff: component counts/types, net classes/design rules, track widths/via sizes, board dimensions/layer count, power supply topology, KiCad version differences.
