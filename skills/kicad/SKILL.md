@@ -727,17 +727,18 @@ python3 <skill-path>/review/scripts/build_review_plan.py \
 python3 <skill-path>/review/scripts/validate_review.py \
   analysis/<run_id>/review_annotations.json
 
-# 4. Merge the overlay into analysis/merged/<analyzer>.json
+# 4. Merge the overlay into analysis/<run_id>/merged/<analyzer>.json
 python3 <skill-path>/review/scripts/merge_annotations.py \
-  --analysis-dir analysis/<run_id>/ \
-  --annotations analysis/<run_id>/review_annotations.json
+  --raw-dir     analysis/<run_id>/ \
+  --review      analysis/<run_id>/review_annotations.json \
+  --merged-dir  analysis/<run_id>/merged/
 ```
 
 ### Output shape
 
 - `analysis/design_context.json` — structured design intent (target market, certification scope, lifecycle stage, power budget, deployment environment). Closed-set enums per `review/schemas/design_context.schema.json`. Used by Layer 1 detectors for severity tuning AND by the Layer 2 reviewer subagent.
-- `analysis/review_annotations.json` — per-finding `decision: "confirm" | "suppress" | "escalate"` with a `reason` (≥20 chars required), an optional `severity_override`, and up to 5 free-form `reviewer_observations` (capped at confidence `"medium"`). Schema in `review/schemas/review_annotations.schema.json`.
-- `analysis/merged/<analyzer>.json` — Layer 1 baseline with `llm_decision`, `llm_reason`, `llm_severity_override`, and `llm_reviewer_observations` appended per finding. Strip those fields and you recover the Layer 1 baseline byte-for-byte.
+- `analysis/review_annotations.json` — per-finding `status: "confirmed" | "suppressed" | "escalated"` with a `reason` (≥20 chars required), an optional `suggested_severity`, and up to 5 free-form `reviewer_observations` (capped at confidence `"medium"`). Each annotation references a Layer 1 finding by its `finding_id`. Schema in `review/schemas/review_annotations.schema.json`.
+- `analysis/merged/<analyzer>.json` — Layer 1 baseline with a single `llm_review` object (status, reason, confidence, reviewed_at, and optional suggested_severity) appended per reviewed finding. Strip every `llm_*` field and you recover the Layer 1 baseline byte-for-byte.
 
 ### Hard invariants (enforced by merge_annotations.py)
 
