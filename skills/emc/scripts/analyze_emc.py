@@ -656,6 +656,11 @@ def main():
             print(format_text(result.get('findings', []), args.audience, args.stage))
         else:
             print(format_text_report(result))
+    elif args.analysis_dir:
+        # Already cached above (one-line confirmation printed to stderr). Don't
+        # also dump the full JSON to stdout — match the core analyzers, whose
+        # --analysis-dir mode is quiet.
+        pass
     else:
         json.dump(result, sys.stdout, indent=2)
         print(file=sys.stdout)
