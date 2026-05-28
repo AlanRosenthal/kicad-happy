@@ -1376,6 +1376,11 @@ def extract_board_outline(root: list) -> dict:
         "edge_count": len(edges),
         "edges": edges,
         "bounding_box": bbox,
+        # Convenience aliases so consumers don't have to reach into bounding_box.
+        # bbox already accounts for arc extrema (see EQ-100 above), so these are
+        # correct on arc-edge outlines too; None only when no Edge.Cuts geometry.
+        "width_mm": bbox["width"] if bbox else None,
+        "height_mm": bbox["height"] if bbox else None,
     }
 
 

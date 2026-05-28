@@ -131,6 +131,12 @@ class BoardOutline:
     bounding_box: Optional[BoundingBox] = field(default=None, metadata={
         "description": "Axis-aligned bounding box of the outline; null if "
                        "no outline was parsed."})
+    width_mm: Optional[float] = field(default=None, metadata={
+        "description": "Board width in mm (bounding_box width; accounts for "
+                       "arc extrema). null if no outline was parsed."})
+    height_mm: Optional[float] = field(default=None, metadata={
+        "description": "Board height in mm (bounding_box height; accounts for "
+                       "arc extrema). null if no outline was parsed."})
 
 
 @dataclass
