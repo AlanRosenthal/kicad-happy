@@ -66,6 +66,7 @@ For a full design review, explicitly account for each item below in the report:
 - `analyze_thermal.py` when both schematic and PCB JSON exist
 - `analyze_gerbers.py` when fabrication outputs exist
 - lifecycle audit when network access and MPN coverage allow it
+- Layer 2 LLM review when any Layer 1 `error`/`warning` severity is context-dependent (EMC, decoupling, pull-up values, derating) or a design context is resolvable — see "Layer 2 LLM Review" below. Skip only for narrow single-analyzer spot checks, and disclose the skip in the report.
 - prior review / prior run delta check
 - raw schematic/PCB spot-verification elevated to full verification for critical parts
 - explicit report sections for blockers, verification basis, false positives, and skipped analyses
@@ -456,8 +457,9 @@ drill_classification, pad_summary, board_dimensions, gerbers, drills
 9. **Read the `.kicad_pro`** project file directly (it's JSON) for design rules, net classes, and DRC/ERC settings.
 10. **Check for prior design reviews** — scan the project directory for existing review files (`*review*.md`, `*design-review*.md`). If found, read the most recent one. If `auto_diff` is enabled and prior runs exist, run `diff_analysis.py` on current vs previous run and include the delta in the "Previous Review Delta" section.
 11. **Verify each output** against the raw files and datasheets before using the data in your report.
-12. **Produce a unified report** covering schematic analysis, PCB layout analysis, cross-domain findings, EMC risk assessment, simulation verification, thermal hotspots, and cross-reference findings. See `references/report-generation.md` for the report template. Before claiming completeness, run `scripts/check_report_sections.py --analysis-dir analysis/ --report <report.md>` and address any missing sections it reports.
-13. **Disclose all review gaps explicitly** — if thermal, lifecycle, gerber, datasheet extraction, or prior-review delta were not performed, add a short "Not performed / limits" section to the report instead of omitting them silently.
+12. **Run Layer 2 LLM review** when any Layer 1 `error`/`warning` severity is context-dependent (EMC, decoupling, pull-up values, derating) or a design context is resolvable — the reviewer subagent confirms/suppresses/escalates findings against declared design intent. See "Layer 2 LLM Review" below for the plan → design_context → reviewer → merge pipeline. Skip only for narrow single-analyzer spot checks, and disclose the skip in step 14.
+13. **Produce a unified report** covering schematic analysis, PCB layout analysis, cross-domain findings, EMC risk assessment, simulation verification, thermal hotspots, and cross-reference findings. See `references/report-generation.md` for the report template. Before claiming completeness, run `scripts/check_report_sections.py --analysis-dir analysis/ --report <report.md>` and address any missing sections it reports.
+14. **Disclose all review gaps explicitly** — if thermal, lifecycle, gerber, datasheet extraction, Layer 2, or prior-review delta were not performed, add a short "Not performed / limits" section to the report instead of omitting them silently.
 
 The more data sources you combine, the more confident the analysis. A schematic-only review misses layout issues; a PCB-only review misses design intent. Always use everything available.
 
@@ -694,9 +696,9 @@ All schematic rule findings appear in `findings[]`. The following rule IDs are p
 
 SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 is reserved for the "no source at all" case (warning); the softer "sourced via bridged jumper / ferrite" case has its own rule_id RS-003 (info) so reviewers and CI gates can filter the two independently. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin. PP-001 demotes to `info` on module-internal LDO rails (`VDDPLL_*`, `VDDA_INT_*`, `VDDCORE_*`, `VCAP`, `VDDREG`) where decoupling-only is the correct topology.
 
-## Layer 2 LLM Review (v1.4, optional)
+## Layer 2 LLM Review (v1.4)
 
-The analyzers above produce **Layer 1**: deterministic + heuristic findings emitted by detector code. v1.4 adds an optional **Layer 2** review platform at `skills/kicad/review/` that overlays LLM judgment on top of Layer 1 findings — confirming, suppressing, or escalating individual findings with structured annotations, plus emitting reviewer observations that don't fit any detector.
+The analyzers above produce **Layer 1**: deterministic + heuristic findings emitted by detector code. v1.4 adds a **Layer 2** review platform at `skills/kicad/review/` that overlays LLM judgment on top of Layer 1 findings — confirming, suppressing, or escalating individual findings with structured annotations, plus emitting reviewer observations that don't fit any detector. For a full design review it is part of the workflow (step 12), not an afterthought; it is skippable only for narrow spot checks.
 
 Layer 2 is **additive and non-destructive**. Layer 1 outputs in `analysis/<analyzer>.json` are never modified. Merged outputs land at `analysis/merged/<analyzer>.json`. Stripping the `llm_*` fields from a merged output yields a byte-identical Layer 1 baseline.
 
@@ -704,7 +706,7 @@ Layer 2 is **additive and non-destructive**. Layer 1 outputs in `analysis/<analy
 
 Trigger Layer 2 for **design reviews where a single deterministic severity (warning vs error vs info) is genuinely context-dependent** — for example: a 47kΩ I2C pull-up is `warning` by default but `error` if the design context says "1MHz Fm+", or `info` if it says "low-power slow-bus sensor." Layer 2 lets the reviewer subagent escalate or suppress findings based on declared design intent.
 
-Skip Layer 2 for routine checks where Layer 1 severities already match the user's risk model.
+Skip Layer 2 only for narrow single-analyzer spot checks where Layer 1 severities already match the user's risk model. For a full design review, run it whenever a design context is resolvable or any `error`/`warning` severity is context-dependent, and disclose a skip in the report's "Not Performed / Review Limits" section.
 
 ### Workflow
 
