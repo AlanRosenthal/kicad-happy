@@ -23,7 +23,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from finding_schema import make_finding, compute_trust_summary
+from finding_schema import make_finding, compute_trust_summary, assign_finding_ids
 from kicad_utils import build_net_id_map as _build_net_id_map
 from envelopes.cross_analysis import CrossAnalysisEnvelope
 from schema_codec import emit_schema
@@ -1034,6 +1034,10 @@ def main():
 
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
+
+    # Guarantee every finding carries a stable finding_id (Layer 2 merge keys
+    # on it). Runs after filtering; before any output branch.
+    assign_finding_ids(result.get("findings", []), "cross_analysis")
 
     # Wire capability_mode_ref (Phase 4 spec §3.3). Resolved early so
     # inputs.run_id and capability_mode_ref.run_id match.

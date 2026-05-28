@@ -37,7 +37,7 @@ from kicad_utils import (is_ground_name, is_power_net_name,
                          extract_pro_design_rules, extract_pro_text_variables,
                          load_kicad_dru, load_lib_tables)
 from pcb_connectivity import build_connectivity_graph
-from finding_schema import compute_trust_summary, sort_findings
+from finding_schema import compute_trust_summary, sort_findings, assign_finding_ids
 from envelopes.pcb import PCBEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
@@ -6683,6 +6683,10 @@ def main():
 
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
+
+    # Guarantee every finding carries a stable finding_id (Layer 2 merge keys
+    # on it). Runs after all filtering; before any output branch.
+    assign_finding_ids(result.get('findings', []), 'pcb')
 
     if args.text:
         from output_filters import format_text

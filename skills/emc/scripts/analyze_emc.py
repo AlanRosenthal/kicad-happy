@@ -584,6 +584,12 @@ def main():
     # capability_mode_ref already resolved early — reuse to keep run_id stable.
     result['capability_mode_ref'] = _capability_mode_ref
 
+    # Guarantee every finding carries a stable finding_id (Layer 2 merge keys
+    # on it). MUST run before the cache block below writes the file, and after
+    # --compact + output filters mutate findings.
+    from finding_schema import assign_finding_ids
+    assign_finding_ids(result.get('findings', []), 'emc')
+
     # Analysis cache integration
     if args.analysis_dir:
         import tempfile

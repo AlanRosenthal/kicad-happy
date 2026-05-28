@@ -132,7 +132,7 @@ from lookup_detectors import (
     detect_wrong_signal_type,
     detect_missing_required_components,
 )
-from finding_schema import compute_trust_summary, sort_findings, make_finding
+from finding_schema import compute_trust_summary, sort_findings, make_finding, assign_finding_ids
 from envelopes.schematic import SchematicEnvelope
 from schema_codec import emit_schema
 from inputs_builder import build_inputs, build_compat
@@ -9589,6 +9589,10 @@ def main():
         result['trust_summary'] = compute_trust_summary(_final_findings, bom=result.get('bom'))
     except (ImportError, Exception):
         pass
+
+    # Guarantee every finding carries a stable finding_id (Layer 2 merge keys
+    # on it). Runs after all filtering/appends; before any output branch.
+    assign_finding_ids(result.get('findings', []), 'schematic')
 
     if args.text:
         from output_filters import format_text

@@ -63,6 +63,50 @@ def _derive_finding_id(*, source, rule_id, detection_id, components, nets, pins,
     return f"{source}:{rule_id}:{_short_hash(summary)}"
 
 
+def assign_finding_ids(findings, source):
+    """Guarantee every finding in `findings` carries a stable, unique finding_id.
+
+    Most detectors don't route through make_finding (EMC has its own helper,
+    several emit raw dicts), so finding_id was absent on the bulk of findings —
+    which made the Layer 2 merge a silent no-op (merge_annotations.py matches
+    annotations to findings by finding_id). This pass runs once per analyzer at
+    serialization time, after all filtering/appends, so the entire findings[]
+    is covered regardless of construction path.
+
+    Overwrites any existing finding_id so the `{source}:` prefix is consistent
+    envelope-wide (`source` is the canonical analyzer name == file stem, e.g.
+    "schematic", not the per-caller "sch"). Distinct findings that derive the
+    same id get a `#N` suffix; if the *same object* appears in the list more
+    than once (a pre-existing aliasing quirk in a couple detectors), it keeps a
+    single id rather than being bumped to a spurious `#1`. Call AFTER
+    sort_findings so the suffix order is deterministic across runs.
+    """
+    seen = {}
+    assigned = {}
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        if id(f) in assigned:
+            continue
+        fid = _derive_finding_id(
+            source=source,
+            rule_id=f.get("rule_id", "UNK"),
+            detection_id=f.get("detection_id"),
+            components=f.get("components", []),
+            nets=f.get("nets", []),
+            pins=f.get("pins", []),
+            summary=f.get("summary", ""),
+        )
+        if fid in seen:
+            seen[fid] += 1
+            fid = f"{fid}#{seen[fid]}"
+        else:
+            seen[fid] = 0
+        f["finding_id"] = fid
+        assigned[id(f)] = fid
+    return findings
+
+
 _SEVERITY_ORDER = ("info", "warning", "error")
 
 _SEVERITY_NORMALIZE = {

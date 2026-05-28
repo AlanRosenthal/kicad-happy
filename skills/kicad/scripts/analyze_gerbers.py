@@ -1624,6 +1624,11 @@ def main():
     from output_filters import apply_output_filters
     apply_output_filters(result, args.stage, args.audience)
 
+    # Guarantee every finding carries a stable finding_id (Layer 2 merge keys
+    # on it). Runs after filtering; before any output branch.
+    from finding_schema import assign_finding_ids
+    assign_finding_ids(result.get("findings", []), "gerber")
+
     # Wire capability_mode_ref (Phase 4 spec §3.3). Resolved early so
     # inputs.run_id and capability_mode_ref.run_id match.
     result["capability_mode_ref"] = _capability_mode_ref
