@@ -12,7 +12,7 @@ zero-dependency and offline.
 Usage:
     python3 lifecycle_audit.py analysis.json
     python3 lifecycle_audit.py analysis.json --temp-range "industrial"
-    python3 lifecycle_audit.py analysis.json --temp-range "-40,85"
+    python3 lifecycle_audit.py analysis.json --temp-range="-40,85"  # use = for negative min
     python3 lifecycle_audit.py analysis.json --output lifecycle.json
     python3 lifecycle_audit.py analysis.json --only digikey
 
@@ -939,7 +939,9 @@ def main():
     parser.add_argument(
         "--temp-range",
         help="Design temperature range: preset name (commercial, industrial, "
-             "extended, automotive, military) or 'min,max' in °C (e.g., '-40,85')",
+             "extended, automotive, military) or 'min,max' in °C. When the min "
+             "is negative, use the = form so argparse doesn't read it as a flag: "
+             "--temp-range=\"-40,85\"",
     )
     parser.add_argument(
         "--output", "-o",
