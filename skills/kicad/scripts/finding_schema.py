@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 VALID_SEVERITIES = ('error', 'warning', 'info')
@@ -44,23 +45,52 @@ def _first_nonempty(*candidates):
     return None
 
 
+# A "numbered" rule code (AM-001, LR-001, …). Only these may occupy the
+# rule_id segment of the 3-part finding_id form; detection/audit codes
+# (*-DET, *-AUD) and lowercase section names are not numbered rules and fold
+# into the 2-part form below.
+_RULE_CODE_RE = re.compile(r"^[A-Z]+-\d+$")
+
+
+def _id_segment(s):
+    """Reduce `s` to a single well-formed finding_id segment.
+
+    Any character outside the locator/detection-id charset (`[A-Za-z0-9_./+-]`)
+    — including the `:` separator and whitespace — collapses to `-`, so the
+    result can never introduce a spurious segment boundary. Guarantees the
+    output is non-empty.
+    """
+    seg = re.sub(r"[^A-Za-z0-9_./+-]+", "-", str(s)).strip("-")
+    return seg or "x"
+
+
 def _derive_finding_id(*, source, rule_id, detection_id, components, nets, pins, summary):
-    """Derive a stable finding_id per Phase 4 spec §3.2.
+    """Derive a stable, well-formed finding_id per Phase 4 spec §3.2.
 
     Priority:
         1. {source}:{detection_id}        (detector provided one)
         2. {source}:{rule_id}:{primary}   (component/net/pin locator)
         3. {source}:{rule_id}:{hash}      (short SHA fallback on summary)
+
+    Forms 2/3 (the colon-separated rule_id form) are used only when `rule_id`
+    is a numbered rule code (`[A-Z]+-\\d+`). Any other rule_id — *-DET / *-AUD
+    detection/audit codes, lowercase section names — and every detection_id
+    fold into the colon-free `{source}:{token}` form so the id always parses as
+    one of the two spec shapes regardless of the constructing detector.
     """
     if detection_id:
-        return f"{source}:{detection_id}"
+        return f"{source}:{_id_segment(detection_id)}"
     primary = _first_nonempty(components, nets, pins)
     if primary is not None:
         # Pin items may be dicts; coerce to string repr first
         if isinstance(primary, dict):
             primary = primary.get("ref") or primary.get("number") or str(primary)
-        return f"{source}:{rule_id}:{_normalize_locator(primary)}"
-    return f"{source}:{rule_id}:{_short_hash(summary)}"
+        locator = _id_segment(_normalize_locator(primary))
+    else:
+        locator = _id_segment(_short_hash(summary))
+    if _RULE_CODE_RE.match(rule_id or ""):
+        return f"{source}:{rule_id}:{locator}"
+    return f"{source}:{_id_segment(rule_id)}-{locator}"
 
 
 def assign_finding_ids(findings, source):
