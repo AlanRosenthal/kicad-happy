@@ -1147,7 +1147,9 @@ def format_full_report(schematic_path, pcb_path, spice_path, emc_path, derating_
                 issues = finding.get("issues", []) or []
                 checks = finding.get("checks", {})
                 devices = finding.get("devices", [])
-                dev_str = f" ({', '.join(devices)})" if devices else ""
+                dev_names = [d.get('reference', d.get('ref', str(d))) if isinstance(d, dict) else str(d)
+                             for d in devices]
+                dev_str = f" ({', '.join(dev_names)})" if dev_names else ""
                 a(f"**{proto}**{dev_str}")
                 for check_name, check_data in checks.items():
                     if isinstance(check_data, dict) and "status" in check_data:
