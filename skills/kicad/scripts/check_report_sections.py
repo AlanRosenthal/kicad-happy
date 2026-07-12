@@ -173,7 +173,7 @@ def main() -> int:
     elif args.run_dir:
         analysis_dir = os.path.dirname(os.path.abspath(args.run_dir))
     else:
-        analysis_dir = None
+        analysis_dir = "analysis"
 
     sections = required_sections(envs, analysis_dir=analysis_dir)
     print(f"Analyzers present: {', '.join(sorted(envs))}")

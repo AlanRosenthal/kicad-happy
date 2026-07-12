@@ -121,10 +121,15 @@ output by hand:
 |---------------|-----------------------|----------------|
 | Pins on a net | `nets[<name>].pins[].component / .pin_number / .pin_name / .pin_type` | `ref`, `pin`, `type`, `number` |
 | Unnamed-net pretty display | `nets[<name>].display_name` — when set, a `Ref.PinName` hint for an `__unnamed_N` net whose only named IC pin tells the story (e.g. `__unnamed_36 → U1.VBOOT`). Absent means the analyzer couldn't disambiguate. | Ignoring `display_name` and pasting raw `__unnamed_36` into the report |
-| IC pin map | `ic_pin_analysis[]` is a **list** of IC entries; each has `.reference` and `.pins[]` with `.pin_number / .pin_name / .pin_type / .net / .connected_to[]` | Treating it as `{ref: {...}}` or `pins[].number` |
+| IC pin map | `ic_pin_analysis[]` is a **list** of IC entries; each has `.reference` and `.pins[]` with `.pin_number / .pin_name / .pin_type / .net / .connected_to[]`. Scope: `type` in `{ic, connector, crystal, oscillator}` only. | Treating it as `{ref: {...}}` or `pins[].number` |
+| Transistor pin map | `transistor_pin_analysis[]` — **separate** list for `type=transistor` (MOSFETs, BJTs, FETs), same per-entry shape as `ic_pin_analysis[]`. Use this for half-bridge / gate-driver pin verification. | Looking inside `ic_pin_analysis[]` for `Q1` — transistors are not there |
 | Detected circuits | Every pattern-matched circuit (power regulators, RC filters, crystal oscillators, bridges, …) lives in `findings[]` — filter with `finding_schema.get_findings(data, Det.POWER_REGULATORS)` etc. **Do not read from `subcircuits[]`**: that's an IC-neighborhood grouping (`{center_ic, ic_value, neighbor_components, …}`), not a categorized detection index | Looking for `subcircuits.power_regulators`, `subcircuits.rc_filters`, or any `subcircuits[type]` key — these never existed in v1.3 output |
 | Zone net | `pcb.zones[].net` is an **integer net ID**, not a string. Use `f"{net!r}"` or convert first | `f"{net:20s}"` — crashes with `ValueError: Unknown format code 's' for object of type 'int'` |
+| Zone layer | `pcb.zones[].layers` (plural) is the canonical layer list. `zones[].layer` (singular) is reserved/None on multi-layer zones — always read `.layers`. | Reading `zones[].layer` and getting `None` |
 | Footprint position | `pcb.footprints[].x / .y` at top level (no `.position` wrapper) | `footprints[].position.x` |
+| Per-pad net info on a footprint | `pcb.footprints[].pad_nets{pad_number: {net, pin}}` is a dict keyed by pad number. `connected_nets[]` gives the deduped list of nets touching the footprint. | `footprints[].pads[]` — that key does not exist in the output |
+| Tracks summary | `pcb.tracks` is a **dict** (the `Tracks` envelope): `{segment_count, arc_count, layer_distribution{}, width_distribution{}}`. Only `--full` populates the inner `tracks.segments[]` and `tracks.arcs[]` arrays. | `for t in tracks: ...` without `--full` — `tracks` is the summary dict, not a list |
+| Power net routing | `pcb.power_net_routing` is a **list** of per-net entries `[{net, track_count, total_length_mm, ...}, ...]`, not a dict keyed by net. | `power_net_routing["VCC"]` → TypeError |
 | Findings | `findings[]` flat list — each has `rule_id`, `detector`, `severity`, `summary`, `report_context`. Filter with `finding_schema.get_findings(data, Det.*)` or `group_findings(data)` | Looking for keyed dicts like `signal_analysis.power_regulators[]` (pre-v1.3 format, removed) |
 
 This prevents format-string bugs and wrong field names. Use f-strings or `json.dumps()` for output formatting — never `%s` with non-string types. See `references/output-schema.md` for the full schema with common extraction patterns.
@@ -230,7 +235,7 @@ python3 <skill-path>/scripts/cross_analysis.py \
 
 # One-off (bypasses the cache)
 python3 <skill-path>/scripts/cross_analysis.py \
-    --schematic schematic.json --pcb pcb.json --output cross.json
+    --schematic schematic.json --pcb pcb.json --output cross_analysis.json
 ```
 
 Checks: CC-001 connector current capacity, EG-001 ESD protection gaps, DA-001 decoupling adequacy, XV-001..003 schematic/PCB sync. PCB JSON optional.
@@ -239,7 +244,7 @@ Mechanical cross-verify (PCB vs schematic geometry): `python3 <skill-path>/scrip
 
 ### Connectivity Graph (--full mode)
 
-When `--full` is used with the PCB analyzer, the output includes a `connectivity_graph` section with per-net copper connectivity analysis via union-find over pads, tracks, vias, and zone fills. This enables deterministic plane split detection and return path validation in cross_analysis.py. Each net entry shows island count, component-to-island mapping, gap locations, and disconnected pad pairs.
+When `--full` is used with the PCB analyzer, the output includes a `connectivity_graph` section with per-net copper connectivity analysis via union-find over pads, tracks, vias, and zone fills. This enables deterministic plane split detection and return path validation in cross_analysis.py. **The top-level keys of `connectivity_graph` are net names themselves** — e.g., `cg['GND']`, `cg['Net-(D2-K)']`, `cg['+3V3']` — *not* a `per_net` wrapper. Each net entry shows island count, component-to-island mapping (`{component:pad: island_id}`), gap locations, and disconnected pad pairs.
 
 ### Gerber & Drill Analyzer
 ```bash
@@ -264,7 +269,7 @@ result cached. Add `--compact` for single-line JSON.
 
 **Analyzer JSON is worth keeping** — these are expensive to regenerate (large
 schematics take time). `--analysis-dir` preserves every run and is the form
-downstream tools (kidoc, diff_analysis, what_if) expect. They're not worth
+downstream tools (diff_analysis, what_if) expect. They're not worth
 committing to git, but don't delete them between analysis steps.
 
 ### Harmonized Output Format
@@ -274,7 +279,7 @@ All analyzers produce a uniform output envelope:
 ```json
 {
     "analyzer_type": "schematic|pcb|emc|cross_analysis|thermal|gerber|lifecycle|spice",
-    "schema_version": "1.3.0",
+    "schema_version": "1.4.0",
     "summary": {
         "total_findings": 42,
         "by_severity": {"error": 3, "warning": 15, "info": 24}
@@ -285,7 +290,7 @@ All analyzers produce a uniform output envelope:
     "trust_summary": {
         "total_findings": 42,
         "trust_level": "high|mixed|low",
-        "by_confidence": {"deterministic": 20, "heuristic": 18, "datasheet-backed": 4},
+        "by_confidence": {"deterministic": 20, "heuristic": 18, "datasheet_backed": 4},
         "by_evidence_source": {"datasheet": 4, "topology": 10, "heuristic_rule": 18, ...},
         "provenance_coverage_pct": 96.5
     }
@@ -365,11 +370,11 @@ All fields are optional. Missing fields use defaults.
 ```
 analyzer_type, schema_version, summary, findings, trust_summary,
 file, kicad_version, file_version, title_block, statistics,
-bom, components, nets, subcircuits, ic_pin_analysis, design_analysis,
-connectivity_issues, hierarchy_context, hierarchy_warning,
+bom, components, nets, subcircuits, ic_pin_analysis, transistor_pin_analysis,
+design_analysis, connectivity_issues, hierarchy_context, hierarchy_warning,
 net_classifications, rail_voltages
 ```
-Optional (present when non-empty): `pdn_impedance`, `sleep_current_audit`, `voltage_derating`, `power_budget`, `power_sequencing`, `bom_optimization`, `test_coverage`, `assembly_complexity`, `usb_compliance`, `inrush_analysis`, `sheets` (multi-sheet only), `missing_info`, `bom_lock`, `project_settings`
+Optional (present when non-empty): `pdn_impedance`, `sleep_current_audit`, `power_budget`, `power_sequencing`, `bom_optimization`, `test_coverage`, `assembly_complexity`, `usb_compliance`, `inrush_analysis`, `sheets` (multi-sheet only), `missing_info`, `bom_lock`, `project_settings`
 
 Key nested structures:
 - `statistics`: `{total_components, unique_parts, dnp_parts, total_nets, total_wires, total_no_connects, component_types, power_rails, missing_mpn, ...}`
@@ -639,7 +644,7 @@ python3 <skill-path>/scripts/lifecycle_audit.py analysis.json --output lifecycle
 
 Reads the analyzer JSON BOM section, extracts unique MPNs, queries distributors (LCSC no-auth, DigiKey, element14, Mouser) for lifecycle status and operating temperature. Temperature presets: `commercial` (0/70°C), `industrial` (-40/85°C), `extended` (-40/105°C), `automotive` (-40/125°C), `military` (-55/125°C). Also checks datasheet extraction cache for temperature data before making API calls.
 
-The lifecycle audit produces rich format findings: LC-001 (obsolete/discontinued), LC-002 (last time buy), LC-003 (NRND), LC-004 (unknown status), LC-005 (single source), LC-006 (long lead time), LT-001 (temperature violation).
+The lifecycle audit produces rich format findings: LC-001 (obsolete/discontinued), LC-002 (last time buy), LC-003 (NRND), LC-004 (unknown status), LC-005 (single source), LC-006 (long lead time), LT-001 (temperature violation). When `--lifecycle` is NOT passed (the default), `analyze_schematic.py` emits an `LC-007` info finding noting that the audit was skipped — keeps the gap explicit in the report's findings list instead of being a silent omission.
 
 **Requires network access** — unlike the core analyzers, this script calls distributor APIs. Same environment variables as the distributor skills (DIGIKEY_CLIENT_ID/SECRET, MOUSER_SEARCH_API_KEY, ELEMENT14_API_KEY). LCSC requires no credentials.
 
@@ -654,12 +659,13 @@ All schematic rule findings appear in `findings[]`. The following rule IDs are p
 | SS-003 | `audit_sourcing_gate` | MPN coverage 80–100% | info |
 | NT-001 | `analyze_connectivity` | Single-pin net: signal pin | warning |
 | NT-001 | `analyze_connectivity` | Single-pin net: power_out or passive pin | info |
-| RS-001 | `audit_rail_sources` | Rail has a declared source (direct, PWR_FLAG, or bridged jumper) | info or warning |
+| RS-001 | `audit_rail_sources` | Rail has no declared source (no power_out pin, no PWR_FLAG, no bridged-jumper or regulator output) | warning |
 | RS-002 | `audit_rail_sources` | Rail depends on user closing an open jumper | high |
+| RS-003 | `audit_rail_sources` | Rail sourced indirectly via a bridged-by-default solder jumper or ferrite — functional but consider adding PWR_FLAG | info |
 | LB-001 | `detect_label_aliases` | Net has >= 2 distinct global/hierarchical labels (power nets excluded) | info |
 | PP-001 | `audit_power_pin_dc_paths` | IC power_in pin reaches a rail only through a capacitor (2-hop BFS) | high |
 
-SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 severity varies by confidence level in the detected source. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin.
+SS-001 is a pre-fab blocker — a `high` finding that should be resolved before ordering. NT-001 severity depends on pin type: signal pins (digital I/O, bidirectional) are `warning`; power_out and passive pins are `info`. RS-001 is reserved for the "no source at all" case (warning); the softer "sourced via bridged jumper / ferrite" case has its own rule_id RS-003 (info) so reviewers and CI gates can filter the two independently. PP-001 uses a 2-hop BFS over the net graph, rejecting capacitor edges, to confirm a direct DC path from a power rail to each IC power_in pin. PP-001 demotes to `info` on module-internal LDO rails (`VDDPLL_*`, `VDDA_INT_*`, `VDDCORE_*`, `VCAP`, `VDDREG`) where decoupling-only is the correct topology.
 
 ## Deep Review Pass
 
@@ -687,10 +693,7 @@ For each IC in the design:
    (component/net/pin) and at least one source (datasheet quote
    and/or computation).
 
-Then check interacting pairs: shared rails (sequencing, combined
-load), bus partners (voltage levels, pull-up ownership), thermal
-neighbors. Freestyle digging is encouraged throughout — follow what
-looks wrong.
+Then check interacting pairs: shared rails (sequencing, combined load), bus partners (voltage levels, pull-up ownership), thermal neighbors. Freestyle digging is encouraged — follow what looks wrong.
 
 Validate before reporting:
 
@@ -714,12 +717,7 @@ python3 skills/kicad/scripts/diff_analysis.py \
     analysis/deep_review.prev.json analysis/deep_review.json --text
 ```
 
-Big BOM or context pressure: chunk by subsystem, or fan out per
-IC-group with subagents. See `references/deep-review.md` for
-comparison heuristics per part class, pair-check patterns, and
-helper-script conventions. `analysis/design_context.json` (if
-present) steers priorities — e.g. automotive tightens derating
-attention. It is optional; never block on it.
+Big BOM: chunk by subsystem, or fan out per IC-group with subagents. See `references/deep-review.md` for comparison heuristics per part class, pair-check patterns, and helper-script conventions. `analysis/design_context.json` (if present) steers priorities — e.g. automotive tightens derating attention. Optional; never block on it.
 
 ## Reference Files
 
