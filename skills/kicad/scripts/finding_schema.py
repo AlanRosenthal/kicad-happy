@@ -137,6 +137,47 @@ def assign_finding_ids(findings, source):
     return findings
 
 
+def derive_deep_review_id(finding):
+    """finding_id for a Deep Review finding (v2.0 spec §3.C).
+
+    deep_review:<12-hex> — stable hash over (category, normalized anchors,
+    normalized summary). Anchors come from the evidence block so the id is
+    tied to what the finding cites. LLM rewording of the summary changes
+    the id by design; diff_analysis compensates with anchor-level fuzzy
+    matching (advisory only).
+    """
+    category = (finding.get('category') or '').strip().lower()
+    ev = finding.get('evidence') or {}
+    anchors = sorted(
+        str(a).strip().upper()
+        for key in ('components', 'nets', 'pins')
+        for a in (ev.get(key) or [])
+    )
+    summary = ' '.join((finding.get('summary') or '').lower().split())
+    payload = '\x1f'.join([category, '|'.join(anchors), summary])
+    return 'deep_review:' + _short_hash(payload)
+
+
+def assign_deep_review_ids(findings):
+    """Stamp finding_id on every Deep Review finding, in place.
+
+    Same collision discipline as assign_finding_ids: distinct findings
+    that derive the same id get a #N suffix, in list order.
+    """
+    seen = {}
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        fid = derive_deep_review_id(f)
+        if fid in seen:
+            seen[fid] += 1
+            fid = f"{fid}#{seen[fid]}"
+        else:
+            seen[fid] = 0
+        f['finding_id'] = fid
+    return findings
+
+
 _SEVERITY_ORDER = ("info", "warning", "error")
 
 _SEVERITY_NORMALIZE = {
