@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""v1.4 cache round-trip smoke test.
+"""v1.4/v2 cache round-trip smoke test.
 
 Builds a minimal synthetic analysis dict referencing an IC with MPN
-LM2596-ADJ, plants the canonical v1.4 example extraction at
+LM2596-ADJ, plants the canonical v2-format example extraction at
 <tmpdir>/datasheets/extracted/LM2596-ADJ.json, and calls
-run_datasheet_verification(). The pre-rc.3 behavior is that
-_load_extraction() rejects the v1.4 cache as "low quality" (reads
-meta.extraction_score, gets default 0, fails 6.0 threshold), returns
-None, then verify_decoupling crashes on None.get("application_circuit").
+run_datasheet_verification().
 
-Expected behavior post-rc.3 fix: no crash, returns a dict with
-findings[] (possibly empty — legacy verifier short-circuits on v1.4
-caches because v1.3-shape keys are absent) and summary.
+Expected behavior (v2.0 KH-337 fix):
+- No crash.
+- Returns a dict with findings[] and summary.
+- ics_with_extractions=1 (LM2596-ADJ passes the v1.4 trust gate).
+- Pin-voltage checks run via the v2→v1 adapter (domain-level limits).
+  With VIN=12V (well within op_max=40V / abs_max=45V), no voltage
+  violation findings are produced.
+- One extraction_not_verifiable INFO finding is emitted because
+  required-external and decoupling checks have no v2 equivalent data.
 
 Exit code 0 = pass, 1 = fail (any exception or wrong return shape).
 """
@@ -98,9 +101,34 @@ def main() -> int:
             )
             return 1
 
+        # KH-337: v2 adapter must emit exactly one extraction_not_verifiable
+        # finding (required-external + decoupling unverifiable for v2 format),
+        # and must NOT emit any voltage violation (VIN=12V is within limits).
+        nv_findings = [f for f in result["findings"]
+                       if f.get("type") == "extraction_not_verifiable"]
+        if len(nv_findings) != 1:
+            print(
+                f"FAIL: expected exactly 1 extraction_not_verifiable finding "
+                f"(v2 format: required-external + decoupling not verifiable), "
+                f"got {len(nv_findings)}: {nv_findings}",
+                file=sys.stderr,
+            )
+            return 1
+        voltage_violations = [f for f in result["findings"]
+                              if f.get("type") in ("pin_voltage_abs_max_exceeded",
+                                                   "pin_voltage_operating_exceeded")]
+        if voltage_violations:
+            print(
+                f"FAIL: unexpected voltage violation findings for 12V input "
+                f"(abs_max=45V, op_max=40V): {voltage_violations}",
+                file=sys.stderr,
+            )
+            return 1
+
         print(
-            f"PASS: v1.4 round-trip OK. "
+            f"PASS: v2 round-trip OK. "
             f"findings={len(result['findings'])} "
+            f"(1 extraction_not_verifiable INFO, 0 voltage violations) "
             f"ics_checked={result['summary'].get('ics_checked')} "
             f"ics_with_extractions={ics_with_ext}"
         )

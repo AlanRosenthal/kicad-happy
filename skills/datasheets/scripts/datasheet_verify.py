@@ -72,6 +72,116 @@ def _load_extraction(extract_dir: str, mpn: str) -> dict:
     return {}
 
 
+def _is_v2_format(extraction: dict) -> bool:
+    """Return True if extraction is v2-format (has top-level 'base' key)."""
+    return isinstance(extraction.get("base"), dict)
+
+
+def _v2_domain_voltage_max(base: dict, domain: str) -> float | None:
+    """Resolve a per-domain abs-max voltage from base.absolute_max.
+
+    Tries key patterns: "<domain>_max", "<domain>".  Returns the SpecValue
+    `max` field (first entry) or None if unavailable.
+    """
+    abs_max = base.get("absolute_max") or {}
+    for key in (f"{domain}_max", domain):
+        sv_list = abs_max.get(key)
+        if isinstance(sv_list, list) and sv_list:
+            sv = sv_list[0]
+            if isinstance(sv, dict):
+                v = sv.get("max")
+                if isinstance(v, (int, float)):
+                    return v
+    return None
+
+
+def _v2_domain_voltage_op_max(base: dict, domain: str) -> float | None:
+    """Resolve a per-domain operating-max voltage from base.recommended_operating."""
+    rec_op = base.get("recommended_operating") or {}
+    sv_list = rec_op.get(domain)
+    if isinstance(sv_list, list) and sv_list:
+        sv = sv_list[0]
+        if isinstance(sv, dict):
+            v = sv.get("max")
+            if isinstance(v, (int, float)):
+                return v
+    return None
+
+
+def _v1_view(extraction: dict) -> dict:
+    """Return a v1-shaped view of an extraction dict for use by the verifiers.
+
+    v1-shaped (has 'pins'): returned unchanged — v1 behavior byte-identical.
+    v2-shaped (has 'base'): synthesize the v1 keys the verifiers READ:
+      - 'pins': list of dicts with 'number', 'name', 'type', 'voltage_abs_max',
+        'voltage_operating_max'.  Derived from base.pinout[] by taking
+        numbers[0] as the pin number and resolving per-domain voltage limits
+        from base.absolute_max / base.recommended_operating via power_domain.
+        A per-pin absolute_max SpecValue list (pinout.schema.json) overrides
+        the domain-level abs-max lookup.
+        'required_external' is NOT synthesised (no v2 equivalent) — verifiers
+        skip pins without it, so externals/decoupling remain unverifiable.
+      - 'application_circuit': NOT synthesised — no v2 equivalent key.
+        verify_decoupling short-circuits on its absence.
+
+    Returns {} (empty) if extraction is neither shape.
+    """
+    if not extraction:
+        return extraction
+    # v1: already has pins list at top level
+    if "pins" in extraction:
+        return extraction
+    # v2: synthesise v1-shaped pins from base.pinout
+    if not _is_v2_format(extraction):
+        return extraction
+    base = extraction["base"]
+    pinout = base.get("pinout") or []
+    v1_pins = []
+    for pin in pinout:
+        numbers = pin.get("numbers") or []
+        pin_number = str(numbers[0]) if numbers else None
+        if not pin_number:
+            continue
+        pin_type = pin.get("type") or ""
+        domain = pin.get("power_domain")
+        # Resolve voltage limits via power_domain → base blocks
+        v_abs_max = None
+        v_op_max = None
+        # First check pin-level absolute_max (array-of-SpecValue per
+        # pinout.schema.json, usually null) — overrides the domain lookup
+        pin_abs_max = _spec_max(pin.get("absolute_max"))
+        if isinstance(pin_abs_max, (int, float)):
+            v_abs_max = pin_abs_max
+        # Then domain-level lookup
+        if domain:
+            if v_abs_max is None:
+                v_abs_max = _v2_domain_voltage_max(base, domain)
+            if v_op_max is None:
+                v_op_max = _v2_domain_voltage_op_max(base, domain)
+        v1_pins.append({
+            "number": pin_number,
+            "name": pin.get("name") or f"pin {pin_number}",
+            "type": pin_type,
+            "voltage_abs_max": v_abs_max,
+            "voltage_operating_max": v_op_max,
+            # required_external intentionally absent — no v2 equivalent
+        })
+    # Build the minimal v1 view; no application_circuit (no v2 equivalent)
+    return {"pins": v1_pins, "_v2_adapted": True}
+
+
+def _not_verifiable_finding(mpn: str, detail: str) -> dict:
+    """Info finding when a trust-gate-passing extraction has no usable data
+    for a verifier.  Spec §6: degradation must be VISIBLE, never silent.
+    """
+    return {
+        "type": "extraction_not_verifiable",
+        "severity": "INFO",
+        "mpn": mpn,
+        "detail": detail,
+    }
+
+
 def _passes_trust_gate(extraction: dict) -> bool:
     """Return True if extraction quality is acceptable (or unknown).
 
@@ -173,7 +283,17 @@ def verify_pin_voltages(components: list, nets: dict, extraction_dir: str,
             qf = _quality_finding(mpn, extraction)
             if qf:
                 findings.append(qf)
-        if not extraction or not extraction.get("pins"):
+        if not extraction:
+            continue
+        view = _v1_view(extraction)
+        if not view or not view.get("pins"):
+            # Loud only for v2-adapted views (spec §6); v1 caches without
+            # pins keep the pre-adapter silent-skip behavior byte-identical.
+            if view.get("_v2_adapted") and _passes_trust_gate(extraction):
+                findings.append(_not_verifiable_finding(
+                    mpn,
+                    "pin-voltage checks could not run: extraction has no usable pin voltage data",
+                ))
             continue
 
         pin_nets = comp.get("pin_nets", {})
@@ -182,7 +302,7 @@ def verify_pin_voltages(components: list, nets: dict, extraction_dir: str,
 
         # Build pin lookup from extraction: pin_number → pin_data
         ext_pins = {}
-        for p in extraction["pins"]:
+        for p in view["pins"]:
             pnum = str(p.get("number", ""))
             if pnum:
                 ext_pins[pnum] = p
@@ -272,13 +392,30 @@ def verify_required_externals(components: list, nets: dict, extraction_dir: str,
             qf = _quality_finding(mpn, extraction)
             if qf:
                 findings.append(qf)
-        if not extraction or not extraction.get("pins"):
+        if not extraction:
             continue
+        view = _v1_view(extraction)
+        if not view or not view.get("pins"):
+            # Loud only for v2-adapted views (spec §6); v1 caches without
+            # pins keep the pre-adapter silent-skip behavior byte-identical.
+            if view.get("_v2_adapted") and _passes_trust_gate(extraction):
+                findings.append(_not_verifiable_finding(
+                    mpn,
+                    "required-external checks could not run: extraction has no usable pin data",
+                ))
+            continue
+        # v2-adapted views have pins but no required_external per pin
+        if view.get("_v2_adapted") and _passes_trust_gate(extraction):
+            findings.append(_not_verifiable_finding(
+                mpn,
+                "required-external checks could not run: "
+                "v2 extraction format has no per-pin required_external data",
+            ))
 
         pin_nets = comp.get("pin_nets", {})
 
         ext_pins = {}
-        for p in extraction["pins"]:
+        for p in view["pins"]:
             pnum = str(p.get("number", ""))
             if pnum:
                 ext_pins[pnum] = p
@@ -421,12 +558,23 @@ def verify_decoupling(components: list, nets: dict, extraction_dir: str,
             qf = _quality_finding(mpn, extraction)
             if qf:
                 findings.append(qf)
-        if not extraction or not extraction.get("application_circuit"):
+        if not extraction:
             continue
-        app_circuit = extraction["application_circuit"]
+        view = _v1_view(extraction)
+        if not view or not view.get("application_circuit"):
+            # Loud only for v2-adapted views (spec §6); v1 caches that never
+            # populated the optional application_circuit field keep the
+            # pre-adapter silent-skip behavior byte-identical.
+            if view.get("_v2_adapted") and _passes_trust_gate(extraction):
+                findings.append(_not_verifiable_finding(
+                    mpn,
+                    "decoupling checks could not run: extraction has no application_circuit data",
+                ))
+            continue
+        app_circuit = view["application_circuit"]
 
         pin_nets = comp.get("pin_nets", {})
-        ext_pins = {str(p.get("number", "")): p for p in extraction.get("pins", [])}
+        ext_pins = {str(p.get("number", "")): p for p in view.get("pins", [])}
 
         # Collect recommendations
         recommendations = []
@@ -548,6 +696,36 @@ def run_datasheet_verification(analysis: dict, project_dir: str = "") -> dict:
     all_findings.extend(verify_pin_voltages(components, nets, extract_dir, rail_voltages))
     all_findings.extend(verify_required_externals(components, nets, extract_dir, comp_lookup))
     all_findings.extend(verify_decoupling(components, nets, extract_dir, comp_lookup, parsed_values))
+
+    # Merge per-MPN info findings emitted independently by each verifier:
+    # - extraction_not_verifiable: combine details into one finding per MPN.
+    # - extraction_quality_low: identical duplicates; keep the first per MPN
+    #   (spec §3.A.2: once per distinct MPN).
+    nv_by_mpn: dict = {}
+    seen_quality_low: set = set()
+    other_findings: list = []
+    for f in all_findings:
+        ftype = f.get("type")
+        if ftype == "extraction_not_verifiable":
+            mpn_key = f.get("mpn", "")
+            if mpn_key not in nv_by_mpn:
+                nv_by_mpn[mpn_key] = f.copy()
+            else:
+                # Append additional detail from subsequent verifiers
+                existing = nv_by_mpn[mpn_key]["detail"]
+                extra = f.get("detail", "")
+                if extra and extra not in existing:
+                    nv_by_mpn[mpn_key]["detail"] = f"{existing}; {extra}"
+        elif ftype == "extraction_quality_low":
+            mpn_key = f.get("mpn", "")
+            if mpn_key in seen_quality_low:
+                continue
+            seen_quality_low.add(mpn_key)
+            other_findings.append(f)
+        else:
+            other_findings.append(f)
+    # Reconstruct: non-nv findings first, then one nv per MPN
+    all_findings = other_findings + list(nv_by_mpn.values())
 
     # Build severity summary
     by_severity = {}
