@@ -7,9 +7,7 @@ a self-describing dict consumable by suggest-fixes and lighter LLMs.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from pathlib import Path
 
 VALID_SEVERITIES = ('error', 'warning', 'info')
 VALID_CONFIDENCES = ('deterministic', 'heuristic', 'datasheet-backed')
@@ -178,8 +176,6 @@ def assign_deep_review_ids(findings):
     return findings
 
 
-_SEVERITY_ORDER = ("info", "warning", "error")
-
 _SEVERITY_NORMALIZE = {
     # Legacy uppercase pre-v1.3 taxonomy
     "CRITICAL": "error",
@@ -217,84 +213,6 @@ def normalize_severity(sev):
         sev, _SEVERITY_NORMALIZE.get(sev.upper(), "info"))
 
 
-_TUNING_CACHE = None
-_TUNING_PATH = Path(__file__).resolve().parents[2] / "kicad" / "review" / "severity_tuning.json"
-
-
-def _load_severity_tuning():
-    """Lazy-load tuning matrix once per process."""
-    global _TUNING_CACHE
-    if _TUNING_CACHE is None:
-        try:
-            _TUNING_CACHE = json.loads(_TUNING_PATH.read_text()).get("rules", {})
-        except (FileNotFoundError, json.JSONDecodeError):
-            _TUNING_CACHE = {}
-    return _TUNING_CACHE
-
-
-def _severity_index(s):
-    try:
-        return _SEVERITY_ORDER.index(s)
-    except ValueError:
-        return 0  # unknown -> info
-
-
-def _walk_severity(s, delta):
-    """Apply severity_delta walking _SEVERITY_ORDER. delta = '+1' currently only."""
-    if delta != "+1":
-        return s  # severity-decreasing deltas disallowed in v1.4 per spec §4.4
-    idx = _severity_index(s)
-    return _SEVERITY_ORDER[min(idx + 1, len(_SEVERITY_ORDER) - 1)]
-
-
-def _matches_when(when_clause, design_context):
-    """Return True iff every key in when_clause matches design_context (effective_*)."""
-    for k, v in when_clause.items():
-        # Read effective value if design_context has a triple shape; else direct.
-        ctx_val = design_context.get(k)
-        if isinstance(ctx_val, dict) and "effective" in ctx_val:
-            ctx_val = ctx_val["effective"]
-        if ctx_val != v:
-            return False
-    return True
-
-
-def _apply_severity_tuning(rule_id, base_severity, design_context):
-    """Apply severity tuning matrix per design_context. Real impl per spec §4.4.
-
-    Algorithm:
-      1. Start with base_severity (or rule's base_severity if mismatched)
-      2. For each tuning entry whose when-clause matches:
-           - Apply severity_delta if present
-           - Apply severity_floor if present (clamps minimum)
-      3. Cap at tuning_max_severity (HI-9)
-      4. Return resulting severity
-    """
-    if design_context is None:
-        return base_severity
-    rules = _load_severity_tuning()
-    rule = rules.get(rule_id)
-    if rule is None:
-        return base_severity  # unknown rule passes through
-    severity = base_severity
-    for entry in rule.get("tuning", []):
-        if not _matches_when(entry["when"], design_context):
-            continue
-        if "severity_delta" in entry:
-            severity = _walk_severity(severity, entry["severity_delta"])
-        if "severity_floor" in entry:
-            floor_idx = _severity_index(entry["severity_floor"])
-            cur_idx = _severity_index(severity)
-            if cur_idx < floor_idx:
-                severity = entry["severity_floor"]
-    # HI-9: cap at tuning_max_severity
-    max_idx = _severity_index(rule.get("tuning_max_severity", "error"))
-    cur_idx = _severity_index(severity)
-    if cur_idx > max_idx:
-        severity = _SEVERITY_ORDER[max_idx]
-    return severity
-
-
 def make_finding(
     detector: str,
     rule_id: str,
@@ -321,6 +239,9 @@ def make_finding(
     Required fields: detector, rule_id, category, summary, description.
     All other fields have sensible defaults.
 
+    design_context: accepted for call-site compatibility; severity tuning
+        retired in v2.0 (spec §5) — the value is ignored.
+
     Extra kwargs are merged into the finding (e.g., domain-specific data).
     """
     if severity not in VALID_SEVERITIES:
@@ -335,8 +256,6 @@ def make_finding(
         raise ValueError(
             f"make_finding: invalid evidence_source {evidence_source!r} "
             f"(valid: {VALID_EVIDENCE_SOURCES})")
-    if design_context is not None:
-        severity = _apply_severity_tuning(rule_id, severity, design_context)
     finding = {
         'detector': detector,
         'rule_id': rule_id,

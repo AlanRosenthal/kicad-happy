@@ -29,7 +29,6 @@
     },
     "reviewer_observations": {
       "type": "array",
-      "maxItems": 5,
       "items": {
         "type": "object",
         "required": ["origin", "observation", "severity", "confidence",
@@ -38,8 +37,8 @@
         "properties": {
           "origin": {"const": "llm_novel"},
           "observation": {"type": "string", "minLength": 1},
-          "severity": {"enum": ["warning", "info"]},
-          "confidence": {"enum": ["medium", "low"]},
+          "severity": {"enum": ["error", "warning", "info"]},
+          "confidence": {"enum": ["high", "medium", "low"]},
           "reasoning": {"type": "string", "minLength": 20},
           "related_findings": {"type": "array", "items": {"type": "string"}},
           "reviewed_at": {"type": "string", "format": "date-time"}

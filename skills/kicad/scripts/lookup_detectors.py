@@ -190,8 +190,7 @@ def detect_vcc_outside_recommended(ctx, rail_voltages: dict) -> list[dict]:
     rail voltage is within base.recommended_operating[domain] range
     (with synonym resolution).
 
-    Severity: warning (escalates via severity_tuning matrix in
-    automotive/medical environments through Layer 2).
+    Severity: warning (base severity; tuning matrix retired in v2.0, spec §5).
     """
     findings: list[dict] = []
     cache_dir = getattr(ctx, "cache_dir", None)

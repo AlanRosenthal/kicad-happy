@@ -1,8 +1,8 @@
-"""Build a Phase 4 review plan JSON for dispatcher consumption.
+"""Build a review plan JSON for dispatcher consumption.
 
-Emits a plan with task_type:"review" for design_context + reviewer subagents.
-Per spec §4.5 + Q7-C: shared plan schema (extends Phase 3 extraction plan
-shape additively); domain-specific result schemas + merge tools.
+design_context is an optional Deep Review input (v2.0 spec §3.B); the
+Layer 2 reviewer role is retired (spec §5). Emits a 1-task plan for the
+design_context subagent.
 """
 from __future__ import annotations
 
@@ -17,7 +17,11 @@ def _now_iso():
 
 
 def build_plan(analysis_dir):
-    """Build a 2-task review plan: design_context + reviewer."""
+    """Build a 1-task review plan: design_context only.
+
+    The Layer 2 reviewer task is retired in v2.0 (spec §5).
+    design_context remains as an optional Deep Review input.
+    """
     analysis_dir = Path(analysis_dir)
     now = _now_iso()
     plan = {
@@ -37,23 +41,6 @@ def build_plan(analysis_dir):
                     str(analysis_dir / "schematic.json"),
                     ".kicad-happy.json",
                 ],
-            },
-            {
-                "task_id": "reviewer",
-                "task_type": "review",
-                "tier": "A",
-                "prompt_path": "skills/kicad/review/prompts/reviewer.md",
-                "result_path": str(analysis_dir / "review_annotations.json"),
-                "result_schema": "skills/kicad/review/schemas/review_annotations.schema.json",
-                "input_artifacts": [
-                    str(analysis_dir / "schematic.json"),
-                    str(analysis_dir / "pcb.json"),
-                    str(analysis_dir / "emc.json"),
-                    str(analysis_dir / "thermal.json"),
-                    str(analysis_dir / "cross_analysis.json"),
-                    str(analysis_dir / "design_context.json"),
-                ],
-                "depends_on": ["design_context"],
             },
         ],
     }

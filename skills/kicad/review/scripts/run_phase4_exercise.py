@@ -154,15 +154,14 @@ def step_3_build_review_plan(fixture_dir: Path):
           "--analysis-dir", str(analysis_dir),
           "--output", str(plan_path)])
     print(f"  plan written: {plan_path}")
-    print("[step 3] OK — dispatch design_context + reviewer per "
+    print("[step 3] OK — dispatch design_context per "
           "skills/datasheets/references/dispatch-claude-code.md Phase 4 addendum")
-    print("  Expected outputs from the dispatch:")
+    print("  Expected output from the dispatch (v2.0: reviewer task retired, spec §5):")
     print(f"    {analysis_dir / 'design_context.json'}")
-    print(f"    {analysis_dir / 'review_annotations.json'}")
 
 
 def step_4_merge_and_assert_invariants(fixture_dir: Path):
-    """Run merge + assert HI-3 + summarize HI-8 enforcement."""
+    """Run merge + assert HI-3 (v2.0: authority caps retired, spec §5)."""
     print("\n[step 4] Merge annotations + invariant checks")
     analysis_dir = fixture_dir / "analysis"
     merged_dir = analysis_dir / "merged"

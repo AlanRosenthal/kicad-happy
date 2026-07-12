@@ -1,13 +1,17 @@
 """Layer 2 annotation merge tool. Phase 4 spec §4.3.
 
-Validates review_annotations.json against schema, applies hard invariants
-(HI-2/HI-8/HI-9), writes analysis/merged/<analyzer>.json overlay artifacts,
-and verifies HI-3 strip-LLM round-trip byte equivalence.
+v2.0: authority caps removed (spec §5 — trust comes from the Deep Review
+evidence gate, not permission rules). HI-3 (strip llm_* → byte-identical
+baseline) still holds.
 
-Failure semantics: orphan annotations and invariant violations are LOGGED
-in the merge report and the offending annotations are SKIPPED. The merge
-itself never fails on these — analyzer outputs always advance. Schema
-validation errors are hard-fail (caller's responsibility).
+Validates review_annotations.json against schema, applies the overlay
+(suppressed annotations now always apply), writes
+analysis/merged/<analyzer>.json overlay artifacts, and verifies HI-3
+strip-LLM round-trip byte equivalence.
+
+Failure semantics: orphan annotations are LOGGED in the merge report and
+SKIPPED. The merge itself never fails on these — analyzer outputs always
+advance. Schema validation errors are hard-fail (caller's responsibility).
 
 Schema validation uses the stdlib-only mini-validator at
 `_mini_jsonschema.py` (kept narrow to the keyword subset Layer 2 needs).
@@ -26,7 +30,6 @@ SCHEMA_PATH = REPO_ROOT / "skills" / "kicad" / "review" / "schemas" / "review_an
 
 ANALYZER_FILES = ["schematic.json", "pcb.json", "emc.json", "thermal.json",
                    "gerber.json", "cross_analysis.json"]
-SUPPRESSION_RATE_CAP = 0.30  # HI-8 30% cap
 
 
 def _now_iso():
@@ -112,18 +115,6 @@ def merge(raw_dir, review_path, merged_dir) -> dict:
             })
             continue
         if ann["status"] == "suppressed":
-            if finding["severity"] == "error":
-                invariant_violations.append({
-                    "type": "suppress_error",
-                    "finding_id": ann["finding_id"],
-                })
-                continue
-            if finding.get("confidence") == "datasheet-backed":
-                invariant_violations.append({
-                    "type": "suppress_datasheet",
-                    "finding_id": ann["finding_id"],
-                })
-                continue
             suppressed_count += 1
         finding["llm_review"] = {
             "status": ann["status"],
@@ -134,19 +125,6 @@ def merge(raw_dir, review_path, merged_dir) -> dict:
         if ann.get("suggested_severity"):
             finding["llm_review"]["suggested_severity"] = ann["suggested_severity"]
         applied += 1
-
-    # Apply 30% suppression rate cap retroactively
-    total_findings = sum(len(env.get("findings", [])) for env in envelopes.values())
-    if total_findings > 0 and suppressed_count > SUPPRESSION_RATE_CAP * total_findings:
-        invariant_violations.append({
-            "type": "suppression_rate_exceeded",
-            "ratio": suppressed_count / total_findings,
-            "cap": SUPPRESSION_RATE_CAP,
-            "suppressed": suppressed_count,
-            "total": total_findings,
-        })
-        # Note: in v1.4 we DON'T un-apply the suppressions; we surface the
-        # violation for the harness to assert. v1.5 may add un-apply logic.
 
     # Write merged outputs
     merged_dir.mkdir(parents=True, exist_ok=True)
