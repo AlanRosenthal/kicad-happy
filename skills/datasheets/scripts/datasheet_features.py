@@ -4,8 +4,10 @@ Thin wrapper over datasheet_extract_cache. Provides field-level accessors for
 IC-aware detectors in kicad, emc, spice, and thermal skills.
 
 Contract:
-  - Returns a dict of feature fields on cache hit with sufficient score.
-  - Returns None on cache miss, stale entry, low score, or wrong schema version.
+  - Returns a dict of feature fields on cache hit, with a `quality` flag
+    describing score/staleness/version status. Quality gate is applied by each
+    caller (v2.0 spec §3.A.1), not by _load.
+  - Returns None only on cache miss or wrong part category (e.g., not a regulator).
   - Individual fields within the dict may be None (datasheet didn't specify).
   - Consumers MUST distinguish None (unknown) from False (explicitly no).
 
@@ -61,26 +63,62 @@ _PIN_NAME_TO_FUNCTION: dict[str, str] = {
 def _load(mpn, extract_dir=None, analysis_json=None, project_dir=None):
     """Resolve extract dir and load the cached extraction for mpn.
 
-    Returns the extraction dict only if:
-      - The entry exists in cache
-      - extraction_metadata.extraction_version >= EXTRACTION_VERSION
-      - extraction_metadata.score >= MIN_SCORE
-
-    Returns None otherwise.
+    Returns the extraction dict on any cache hit (quality is described by
+    `_quality_v13`, never gated here — v2.0 spec §3.A.1). Returns None only
+    on cache miss.
     """
+    import json as _json
     if extract_dir is None:
         extract_dir = resolve_extract_dir(
             analysis_json=analysis_json, project_dir=project_dir
         )
     ext = get_cached_extraction(extract_dir, mpn)
-    if not ext:
-        return None
-    meta = ext.get('extraction_metadata') or {}
-    if (meta.get('extraction_version') or 0) < EXTRACTION_VERSION:
-        return None
-    if (meta.get('extraction_score') or 0) < MIN_SCORE:
-        return None
-    return ext
+    if ext:
+        return ext
+    # Direct-file fallback: allows test fixtures (and simple single-file drops)
+    # that write {mpn}.json directly without a manifest index.
+    direct = Path(extract_dir) / f"{mpn}.json"
+    if direct.exists():
+        try:
+            with direct.open() as f:
+                return _json.load(f)
+        except (OSError, ValueError):
+            pass
+    return None
+
+
+def _quality_v13(ext):
+    """Quality flag for a v1.3-format extraction. Describes — never gates."""
+    meta = (ext or {}).get('extraction_metadata') or {}
+    score = meta.get('extraction_score')
+    version = meta.get('extraction_version') or 0
+    reasons = []
+    if version < EXTRACTION_VERSION:
+        reasons.append(f'stale_version ({version} < {EXTRACTION_VERSION})')
+    if not isinstance(score, (int, float)) or score < MIN_SCORE:
+        reasons.append(f'low_score ({score} < {MIN_SCORE})')
+    return {
+        'score': score if isinstance(score, (int, float)) else None,
+        'scale': '0-10',
+        'trusted': not reasons,
+        'reasons': reasons,
+    }
+
+
+def _quality_v14(facts):
+    """Quality flag for a v1.4 DatasheetFacts. Describes — never gates."""
+    score = facts.quality
+    reasons = []
+    if not isinstance(score, (int, float)) or score < 60:
+        reasons.append(f'low_score ({score} < 60)')
+    if getattr(facts, 'stale', False):
+        reasons.append('stale_pdf')
+    return {
+        'score': score if isinstance(score, (int, float)) else None,
+        'scale': '0-100',
+        'trusted': not reasons,
+        'reasons': reasons,
+    }
 
 
 def _pin_with_function(pins, target_function):
@@ -228,7 +266,6 @@ def get_regulator_features(mpn, *, extract_dir=None,
       - v1.4 cache parses but has no regulator category (v1.5 MCU/opamp/etc.
         extensions are not regulator)
       - v1.3 cache exists but topology not in ('boost', 'buck', 'ldo')
-      - v1.3 cache exists but extraction_version < current or score < MIN_SCORE
 
     Returned dict fields (any may be None individually):
       topology:          'boost' | 'buck' | 'ldo' (v1.3 enum preserved)
@@ -241,6 +278,7 @@ def get_regulator_features(mpn, *, extract_dir=None,
       vout_pin:          str | None
       en_pin:            str | None
       pg_pin:            str | None
+      quality:           {score, scale, trusted, reasons} — always present
     """
     # ---- v1.4 path ----
     facts = _try_v14_facts(mpn, extract_dir=extract_dir,
@@ -248,6 +286,7 @@ def get_regulator_features(mpn, *, extract_dir=None,
     if facts is not None:
         derived = _derive_regulator_features_v14(facts)
         if derived is not None and derived.get('topology') in _REGULATOR_TOPOLOGIES:
+            derived['quality'] = _quality_v14(facts)
             return derived
         # v1.4 facts present but not a regulator (or topology outside the
         # v1.3 enum). Fall through to v1.3 below.
@@ -284,6 +323,7 @@ def get_regulator_features(mpn, *, extract_dir=None,
         'vout_pin': _pin_number(vout_pin),
         'en_pin': _pin_number(en_pin),
         'pg_pin': _pin_number(pg_pin),
+        'quality': _quality_v13(ext),
     }
 
 
@@ -303,6 +343,7 @@ def get_mcu_features(mpn, *, extract_dir=None,
       usb_speed:              'FS' | 'HS' | 'SS' | None
       has_native_usb_phy:     bool | None
       usb_series_r_required:  bool | None
+      quality:                {score, scale, trusted, reasons} — always present
     """
     # ---- v1.4 path ----
     facts = _try_v14_facts(mpn, extract_dir=extract_dir,
@@ -327,6 +368,7 @@ def get_mcu_features(mpn, *, extract_dir=None,
         'usb_speed': usb.get('speed'),
         'has_native_usb_phy': usb.get('native_phy'),
         'usb_series_r_required': usb.get('series_r_required'),
+        'quality': _quality_v13(ext),
     }
 
 
@@ -336,6 +378,9 @@ def get_pin_function(mpn, pin_identifier, *, extract_dir=None,
 
     `pin_identifier` matches against pins[].number (exact) OR pins[].name
     (case-insensitive).
+
+    The trusted gate is applied explicitly here: untrusted extractions return
+    None (v2.0 spec §3.A.1 — gate moves from _load into each consumer).
 
     Dual-cache-read: v1.4 cache preferred, v1.3 fallback.
     """
@@ -352,7 +397,7 @@ def get_pin_function(mpn, pin_identifier, *, extract_dir=None,
     # ---- v1.3 fallback ----
     ext = _load(mpn, extract_dir=extract_dir,
                 analysis_json=analysis_json, project_dir=project_dir)
-    if not ext:
+    if not ext or not _quality_v13(ext)['trusted']:
         return None
     target = str(pin_identifier).strip()
     target_lower = target.lower()
@@ -371,6 +416,8 @@ def is_extraction_available(mpn, *, extract_dir=None,
     if _try_v14_facts(mpn, extract_dir=extract_dir,
                       analysis_json=analysis_json, project_dir=project_dir) is not None:
         return True
-    # v1.3 fallback: existing _load behavior.
-    return _load(mpn, extract_dir=extract_dir,
-                 analysis_json=analysis_json, project_dir=project_dir) is not None
+    # v1.3 fallback: trusted gate applied explicitly here (v2.0 spec §3.A.1 —
+    # gate moves from _load into each consumer that needs a binary usable/not answer).
+    ext = _load(mpn, extract_dir=extract_dir,
+                analysis_json=analysis_json, project_dir=project_dir)
+    return bool(ext) and _quality_v13(ext)['trusted']

@@ -2003,6 +2003,8 @@ def check_diff_pair_cm_radiation(pcb: Optional[Dict],
                 if comp and comp.get('type') not in ('connector',):
                     mcu_mpn = comp.get('mpn') or comp.get('value', '')
                     mcu_feat = _get_mcu_features(mcu_mpn) if mcu_mpn else None
+                    if mcu_feat and not mcu_feat.get('quality', {}).get('trusted', True):
+                        mcu_feat = None   # deterministic detectors keep the v1.4 trust gate (v2.0 §3.A.1)
                     if mcu_feat:
                         usb_speed_resolved = mcu_feat.get('usb_speed')
                         break
