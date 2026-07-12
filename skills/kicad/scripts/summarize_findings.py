@@ -311,10 +311,35 @@ def main(argv: list[str] | None = None) -> int:
                     help="Read raw analysis/<run>/<analyzer>.json instead of "
                          "analysis/merged/<run>/<analyzer>.json. "
                          "Strips Layer 2 overlays for CI/offline use (Phase 4 spec §3.4).")
+    ap.add_argument("--no-deep-review", action="store_true",
+                    help="Exclude analysis/deep_review.json from the summary.")
     args = ap.parse_args(argv)
 
     run_dir, run_id, manifest_version = _resolve_run_dir(args.analysis_dir, args.run)
     findings = _collect_findings(run_dir, only_deterministic=args.only_deterministic)
+
+    deep_review_counts = None
+    if not args.no_deep_review:
+        dr_path = os.path.join(args.analysis_dir, "deep_review.json")
+        if os.path.isfile(dr_path):
+            with open(dr_path, "r", encoding="utf-8") as f:
+                dr = json.load(f)
+            included = 0
+            for finding in dr.get("findings") or []:
+                if not isinstance(finding, dict):
+                    continue
+                row = dict(finding)
+                # deep_review findings group by category where detector
+                # findings group by rule_id (v2.0 spec §3.C)
+                row["rule_id"] = row.get("category") or "(uncategorized)"
+                row["_source_file"] = "deep_review.json"
+                findings.append(row)
+                included += 1
+            deep_review_counts = {
+                "included": included,
+                "quarantined": len(dr.get("quarantined") or []),
+            }
+
     findings = _filter_severity(findings, args.severity)
     findings = _filter_confidence(findings, args.confidence)
     findings = _filter_evidence_source(findings, args.evidence_source)
@@ -367,6 +392,8 @@ def main(argv: list[str] | None = None) -> int:
             "assessments_by_rule_id": assessments_by_rule,
             "assessment_total": assessment_total,
         }
+        if deep_review_counts is not None:
+            payload["deep_review"] = deep_review_counts
         json.dump(payload, sys.stdout, indent=2)
         sys.stdout.write("\n")
     else:
@@ -374,6 +401,11 @@ def main(argv: list[str] | None = None) -> int:
         top = None if args.top == 0 else args.top
         _print_table(rows, top)
         _print_assessments_table(assessments_by_rule)
+        if deep_review_counts is not None:
+            q = deep_review_counts["quarantined"]
+            if q:
+                print(f"deep_review: {q} quarantined (unverified) "
+                      "— see analysis/deep_review.json")
     return 0
 
 
