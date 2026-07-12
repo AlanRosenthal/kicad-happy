@@ -296,6 +296,9 @@ def detect_type(data):
     at = data.get("analyzer_type")
     if at:
         return at
+    # Deep review gate output — unambiguous: no analyzer envelope has "quarantined"
+    if "findings" in data and "quarantined" in data:
+        return "deep_review"
     # Fallback heuristic for older JSON files
     if "findings" in data and "components" in data:
         return "schematic"
@@ -833,6 +836,54 @@ def diff_thermal(base, head, threshold):
 
 
 # ---------------------------------------------------------------------------
+# Deep review diff
+# ---------------------------------------------------------------------------
+
+def diff_deep_review(base, head, threshold=None):
+    """Diff two deep_review.json files (v2.0 spec §3.C).
+
+    Exact finding_id match is primary. Fuzzy pass is advisory only:
+    LLM rewording changes the summary hash, so a persisting issue can
+    surface as fixed+new — a disappeared and an appeared finding with
+    the same category and the same evidence-component set are flagged
+    'likely same, reworded'.
+    """
+    def _by_id(doc):
+        return {f["finding_id"]: f for f in doc.get("findings", [])
+                if isinstance(f, dict) and f.get("finding_id")}
+
+    b, h = _by_id(base), _by_id(head)
+    fixed = [b[k] for k in sorted(b.keys() - h.keys())]
+    new = [h[k] for k in sorted(h.keys() - b.keys())]
+    still_open = [h[k] for k in sorted(b.keys() & h.keys())]
+
+    def _fuzzy_key(f):
+        ev = f.get("evidence") or {}
+        comps = tuple(sorted(str(c).upper() for c in ev.get("components") or []))
+        return ((f.get("category") or "").lower(), comps)
+
+    new_by_key = {}
+    for f in new:
+        new_by_key.setdefault(_fuzzy_key(f), []).append(f)
+    reworded = []
+    for f in fixed:
+        for cand in new_by_key.get(_fuzzy_key(f), []):
+            reworded.append({
+                "base_finding_id": f.get("finding_id"),
+                "head_finding_id": cand.get("finding_id"),
+                "category": f.get("category"),
+                "note": "likely same finding, reworded (advisory)",
+            })
+    return {
+        "fixed": fixed,
+        "new": new,
+        "still_open": still_open,
+        "reworded_candidates": reworded,
+        "quarantined_head": len(head.get("quarantined") or []),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Severity classification
 # ---------------------------------------------------------------------------
 
@@ -1190,6 +1241,47 @@ def format_text(output):
 
 
 # ---------------------------------------------------------------------------
+# Deep review text formatter
+# ---------------------------------------------------------------------------
+
+def _format_deep_review_text(output):
+    """Compact text block for a deep_review diff output."""
+    dr = output.get("deep_review", {})
+    fixed = dr.get("fixed", [])
+    new = dr.get("new", [])
+    still_open = dr.get("still_open", [])
+    reworded = dr.get("reworded_candidates", [])
+    quarantined_head = dr.get("quarantined_head", 0)
+
+    lines = [
+        f"Deep Review Changes: {len(fixed)} fixed, {len(new)} new, "
+        f"{len(still_open)} still open, {quarantined_head} quarantined in head",
+    ]
+    if fixed:
+        lines.append("")
+        lines.append("Fixed:")
+        for f in fixed[:MAX_TEXT_ITEMS]:
+            lines.append(f"  - {f.get('finding_id', '?')} — {f.get('summary', '')}")
+    if new:
+        lines.append("")
+        lines.append("New:")
+        for f in new[:MAX_TEXT_ITEMS]:
+            lines.append(f"  + {f.get('finding_id', '?')} — {f.get('summary', '')}")
+    if still_open:
+        lines.append("")
+        lines.append(f"Still open: {len(still_open)} finding(s) unchanged")
+    if reworded:
+        lines.append("")
+        lines.append("Reworded candidates (advisory):")
+        for r in reworded:
+            lines.append(
+                f"  ~ {r.get('base_finding_id', '?')} → {r.get('head_finding_id', '?')}"
+                f" [{r.get('category', '?')}]"
+            )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Multi-run trend extraction
 # ---------------------------------------------------------------------------
 
@@ -1289,8 +1381,8 @@ def main():
                         help="Run ID to compare (use twice: --run OLD --run NEW). "
                              "Special: 'current', 'previous', or YYYY-MM-DD_HHMM")
     parser.add_argument("--type", dest="output_type",
-                        help="Output type to diff (schematic, pcb, emc, spice). "
-                             "Default: auto-detect first common output")
+                        help="Output type to diff (schematic, pcb, emc, spice, "
+                             "deep_review). Default: auto-detect first common output")
     parser.add_argument("--output", "-o", help="Write output JSON to file (default: stdout)")
     parser.add_argument("--text", action="store_true", help="Output human-readable text instead of JSON")
     parser.add_argument("--threshold", type=float, default=1.0,
@@ -1424,6 +1516,11 @@ def main():
         sys.exit(1)
 
     # Run diff
+    # Note: deep_review is NOT in the dispatch table below because it has a
+    # bespoke output envelope ({"deep_review": ...}) — it's handled by the
+    # early-exit block immediately following. If the early-exit were removed,
+    # the dict path would wrap the result under "diff" instead, breaking the
+    # contract.
     diff_funcs = {
         "schematic": diff_schematic,
         "pcb": diff_pcb,
@@ -1431,10 +1528,36 @@ def main():
         "spice": diff_spice,
         "thermal": diff_thermal,
     }
-    if base_type not in diff_funcs:
+    if base_type not in diff_funcs and base_type != "deep_review":
         print(f"Error: no diff function for analyzer type '{base_type}'",
               file=sys.stderr)
         sys.exit(1)
+
+    if base_type == "deep_review":
+        dr_result = diff_deep_review(base, head)
+        output = {
+            "diff_version": "1.0",
+            "analyzer_type": base_type,
+            "base_file": args.base,
+            "head_file": args.head,
+            "deep_review": dr_result,
+        }
+        if args.text:
+            text = _format_deep_review_text(output)
+            if args.output:
+                with open(args.output, "w") as f:
+                    f.write(text)
+            else:
+                print(text)
+        else:
+            output_json = json.dumps(output, indent=2)
+            if args.output:
+                with open(args.output, "w") as f:
+                    f.write(output_json)
+            else:
+                print(output_json)
+        sys.exit(0)
+
     diff_result = diff_funcs[base_type](base, head, args.threshold)
     summary = build_summary(base_type, diff_result)
 
