@@ -109,7 +109,7 @@ def _load_envelopes(run_dir: str) -> dict:
     return envs
 
 
-def required_sections(envs: dict) -> list[tuple[str, list[str], str]]:
+def required_sections(envs: dict, analysis_dir: str | None = None) -> list[tuple[str, list[str], str]]:
     """Return [(section_label, header_aliases, trigger_reason)]."""
     out = []
     for label, aliases in BASE_SECTIONS:
@@ -127,6 +127,13 @@ def required_sections(envs: dict) -> list[tuple[str, list[str], str]]:
         val = sch.get(key)
         if val:  # present and non-empty
             out.append((label, aliases, f"schematic.{key} present"))
+
+    # Deep Review slot (v2.0 spec §3.E): required when the durable
+    # findings file exists (flat, sibling of manifest.json).
+    if analysis_dir and os.path.isfile(os.path.join(analysis_dir, "deep_review.json")):
+        out.append(("Deep Review",
+                    ["deep review", "unverified claims", "usage-vs-datasheet"],
+                    "deep_review.json present"))
     return out
 
 
@@ -158,7 +165,17 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    sections = required_sections(envs)
+    # Determine the flat analysis dir (sibling of manifest.json) for conditional
+    # section triggers (e.g. deep_review.json). When --analysis-dir is given use
+    # it directly; when only --run-dir is given, derive it as the parent.
+    if args.analysis_dir:
+        analysis_dir = args.analysis_dir
+    elif args.run_dir:
+        analysis_dir = os.path.dirname(os.path.abspath(args.run_dir))
+    else:
+        analysis_dir = None
+
+    sections = required_sections(envs, analysis_dir=analysis_dir)
     print(f"Analyzers present: {', '.join(sorted(envs))}")
     print(f"Required report sections ({len(sections)}):")
     for label, _, trigger in sections:
