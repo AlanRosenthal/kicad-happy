@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -122,7 +123,25 @@ def find_pdf(datasheets_dir, mpn):
 
 
 def _norm_text(s):
-    return " ".join(s.lower().split())
+    # NFKC folds ligatures/fullwidth forms; symbols and punctuation
+    # (degree signs, dashes, curly quotes) collapse to word breaks.
+    s = unicodedata.normalize("NFKC", s).lower()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", s).split())
+
+
+def _squash(s):
+    return _norm_text(s).replace(" ", "")
+
+
+def _quote_in_text(quote, text):
+    """Containment tolerant of case, whitespace, punctuation, Unicode
+    variants, and PDF line-wrap hyphenation (KH-347). The squashed
+    fallback absorbs boundary shifts ("5.5V" vs "5.5 V", "over-\\nvoltage"
+    vs "overvoltage")."""
+    q = _norm_text(quote)
+    if not q:
+        return True
+    return q in _norm_text(text) or _squash(quote) in _squash(text)
 
 
 def check_datasheet(cites, datasheets_dir):
@@ -146,7 +165,7 @@ def check_datasheet(cites, datasheets_dir):
         except (subprocess.CalledProcessError, OSError):
             partial = True
             continue
-        if _norm_text(cite.get("quote", "")) not in _norm_text(text):
+        if not _quote_in_text(cite.get("quote", ""), text):
             where = f"page {page} of" if page else "anywhere in"
             fails.append(f'quote not found {where} {pdf.name}: '
                          f'"{cite.get("quote", "")[:80]}"')
