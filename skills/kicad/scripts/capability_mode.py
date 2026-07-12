@@ -125,7 +125,6 @@ def get_or_create_capability_mode(
         "datasheet_coverage_pct": _compute_coverage_pct(cache_dir),
         "llm_review": llm_review_status,
         "insertion_points_active": [],
-        "reviewer_observations_enabled": False,
         "schema_versions": schema_versions or _read_schema_versions(),
         "platform": "claude-code",
         "tier_map": {},

@@ -72,9 +72,9 @@ The agent reads the analysis JSON and datasheets together, then:
 
 This is the most important step. The output is a starting point for engineering judgment, not a replacement for it. Every calculation is shown. Every datasheet reference is cited. Every finding includes enough context to verify or dismiss it.
 
-### Optional: Layer 2 LLM review (v1.4)
+### Optional: Deep Review pass (v2.0)
 
-v1.4 adds an optional **Layer 2 review platform** that overlays LLM judgment on top of the Layer 1 analyzer findings — confirming or suppressing individual findings based on declared design intent, escalating severity when context warrants it, and emitting reviewer observations that don't fit any detector. Layer 2 is additive and non-destructive: the Layer 1 baseline JSON is never modified, and stripping the overlay fields recovers a byte-identical Layer 1 result. Useful when a single deterministic severity is genuinely context-dependent — a 47kΩ I2C pull-up is `warning` by default but `error` on a 1MHz Fm+ bus, or `info` on a slow low-power sensor link. See `skills/kicad/review/README.md` for the contract and dispatcher recipe.
+v2.0 adds an optional **Deep Review pass** that performs per-IC LLM datasheet comparison — checking each component's actual usage against its datasheet specifications and emitting durable, evidence-linked findings in `analysis/deep_review.json`. The pass is non-destructive: Layer 1 analyzer findings are never modified, and stripping `llm_*` fields recovers the deterministic baseline. An optional `design_context` subagent can supply schematic and design-intent context as input. See `skills/kicad/references/deep-review.md` and `skills/kicad/review/README.md` for the workflow.
 
 ## What the analysis catches
 

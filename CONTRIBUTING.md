@@ -49,7 +49,7 @@ Each skill has a `SKILL.md` with YAML frontmatter (name, description, triggers) 
 | `datasheets/scripts/datasheet_features.py` | ~380 | Consumer API for analyzers (get_regulator_features, get_mcu_features, etc.) — v1.4 dual-cache-read path |
 | `datasheets/scripts/datasheet_lookup.py` | ~240 | v1.4 typed `lookup(mpn) → DatasheetFacts` facade with staleness detection |
 | `datasheets/datasheet_types/` | — | v1.4 typed access layer (DatasheetFacts, SpecValue, Pin, Pinout, trust_gating helpers) |
-| `kicad/review/scripts/merge_annotations.py` | — | Layer 2 review overlay merge: validates + applies review annotations to `analysis/merged/<analyzer>.json` |
+| `kicad/review/scripts/merge_annotations.py` | — | Review overlay merge: validates + applies review annotations to `analysis/merged/<analyzer>.json` |
 
 ### Zero-dependency policy
 

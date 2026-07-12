@@ -148,10 +148,10 @@ ORCHESTRATOR:
 
 ## Phase 4 addendum: dispatching review tasks
 
-Phase 4 (Layer 2 review) reuses this same dispatcher contract per spec §4.5. Key differences:
+The `design_context` task (v2.0) reuses this same dispatcher contract per spec §4.5. Key differences:
 
 - Tasks have `task_type: "review"` (vs `"extraction"` for Phase 3 datasheet tasks).
-- Review tasks live under `skills/kicad/review/prompts/{design_context,reviewer}.md`.
+- The design_context task lives at `skills/kicad/review/prompts/design_context.md`. The reviewer task is retired in v2.0 (superseded by the Deep Review pass — see `skills/kicad/references/deep-review.md`).
 - Result schemas live under `skills/kicad/review/schemas/{design_context,review_annotations}.schema.json`.
 - Result paths are `analysis/<artifact>.json` (NOT `<mpn>.<task>.result.json` — review outputs are run-level, not MPN-level).
 
@@ -162,13 +162,12 @@ When you see a task with `task_type: "review"`:
 | `task_id` | Tier | Subagent prompt |
 |-----------|------|----------------|
 | `design_context` | B (cheaper) | `skills/kicad/review/prompts/design_context.md` |
-| `reviewer` | A (top tier) | `skills/kicad/review/prompts/reviewer.md` |
 
 Same dispatch primitive (Claude Code `Task` tool); same output-validation contract (validate against `result_schema` after subagent returns); same retry semantics (one retry on hard fail with error context).
 
-### Merge after review tasks complete
+### Merge after design_context task completes
 
-Once both review tasks have written their result files, invoke:
+Once the design_context task has written its result file, invoke:
 
 ```bash
 python3 skills/kicad/review/scripts/merge_annotations.py \
