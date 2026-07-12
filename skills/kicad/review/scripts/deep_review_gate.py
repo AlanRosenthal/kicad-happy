@@ -47,11 +47,14 @@ ANCHOR_KEYS = ("components", "nets", "pins")
 
 
 def load_anchor_sets(analysis_dir, run_id=None):
-    """Component refs + net names from the analyzer JSON.
+    """Component refs + net identities from the analyzer JSON.
 
     Resolves the run dir via analysis/manifest.json ('current' unless
     --run given); falls back to a flat analysis dir (schematic.json /
     pcb.json directly inside it) for ad-hoc layouts.
+    A physical net carries up to three identities (KH-347): schematic
+    internal name, annotated display_name, PCB net name. All three are
+    accepted as citations.
     Returns (components: set[str], nets: set[str]).
     """
     analysis_dir = Path(analysis_dir)
@@ -69,14 +72,22 @@ def load_anchor_sets(analysis_dir, run_id=None):
         for c in data.get("components") or []:
             if isinstance(c, dict) and c.get("reference"):
                 comps.add(str(c["reference"]).upper())
-        for name in (data.get("nets") or {}):
+        for name, info in (data.get("nets") or {}).items():
             nets.add(str(name).upper())
+            if isinstance(info, dict) and info.get("display_name"):
+                nets.add(str(info["display_name"]).upper())
     pcb = run_dir / "pcb.json"
     if pcb.is_file():
         data = json.loads(pcb.read_text())
         for fp in data.get("footprints") or []:
             if isinstance(fp, dict) and fp.get("reference"):
                 comps.add(str(fp["reference"]).upper())
+        net_map = data.get("nets")
+        if isinstance(net_map, dict):
+            nets.update(str(v).upper() for v in net_map.values() if v)
+        name_map = data.get("net_name_to_id")
+        if isinstance(name_map, dict):
+            nets.update(str(k).upper() for k in name_map if k)
     return comps, nets
 
 
