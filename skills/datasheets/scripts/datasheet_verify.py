@@ -21,15 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def _load_extraction(extract_dir: str, mpn: str) -> dict:
     """Load extraction JSON for an MPN. Always returns dict; never None.
 
-    Trust gate: low-quality extractions return {} (treated as "no extraction
-    available" by callers). Two cache shapes supported:
-    - v1.4: extraction.quality_score on 0-100 scale, threshold 60.
-    - v1.3 legacy: meta.extraction_score on 0-10 scale, threshold 6.0.
+    Returns {} only for: missing dir, missing MPN, file not found, JSON
+    parse error, or OSError. Quality is NOT a gate here (v2.0 spec
+    §3.A.2) — callers emit an `extraction_quality_low` info finding via
+    `_quality_finding` instead.
 
-    Returns {} for: missing dir, missing MPN, file not found, JSON parse
-    error, OSError, or quality below threshold. Returns the parsed dict
-    when the cache exists and passes the trust gate (or has no quality
-    metadata at all — in that case we don't gate, let downstream decide).
+    Two cache shapes supported:
+    - v1.4: extraction.quality_score on 0-100 scale.
+    - v1.3 legacy: meta.extraction_score on 0-10 scale.
     """
     if not extract_dir or not mpn:
         return {}
@@ -46,7 +45,7 @@ def _load_extraction(extract_dir: str, mpn: str) -> dict:
         try:
             with open(path) as f:
                 extraction = json.load(f)
-            return extraction if _passes_trust_gate(extraction) else {}
+            return extraction
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -66,7 +65,7 @@ def _load_extraction(extract_dir: str, mpn: str) -> dict:
                     if os.path.isfile(fpath):
                         with open(fpath) as f:
                             extraction = json.load(f)
-                        return extraction if _passes_trust_gate(extraction) else {}
+                        return extraction
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -87,6 +86,28 @@ def _passes_trust_gate(extraction: dict) -> bool:
     if isinstance(quality_v13, (int, float)):
         return quality_v13 >= 6.0
     return True
+
+
+def _quality_finding(mpn, extraction):
+    """Info finding when extraction quality is below the trust threshold.
+
+    v2.0 spec §3.A.2: quality is visible data, not a gate. Returns None
+    when the extraction passes the threshold or carries no score.
+    """
+    if not extraction or _passes_trust_gate(extraction):
+        return None
+    q14 = (extraction.get("extraction") or {}).get("quality_score")
+    q13 = (extraction.get("meta") or {}).get("extraction_score")
+    score = q14 if isinstance(q14, (int, float)) else q13
+    return {
+        "type": "extraction_quality_low",
+        "severity": "INFO",
+        "mpn": mpn,
+        "quality_score": score,
+        "detail": (f"{mpn}: extraction quality score {score} is below the "
+                   f"trust threshold; verification findings for this part "
+                   f"are based on a low-quality extraction"),
+    }
 
 
 def _resolve_extract_dir(project_dir: str) -> str:
@@ -136,6 +157,7 @@ def verify_pin_voltages(components: list, nets: dict, extraction_dir: str,
     Returns list of finding dicts.
     """
     findings = []
+    seen_quality_mpns: set = set()
 
     for comp in components:
         if comp.get("type") != "ic":
@@ -146,6 +168,11 @@ def verify_pin_voltages(components: list, nets: dict, extraction_dir: str,
             continue
 
         extraction = _load_extraction(extraction_dir, mpn)
+        if mpn not in seen_quality_mpns:
+            seen_quality_mpns.add(mpn)
+            qf = _quality_finding(mpn, extraction)
+            if qf:
+                findings.append(qf)
         if not extraction or not extraction.get("pins"):
             continue
 
@@ -229,6 +256,7 @@ def verify_required_externals(components: list, nets: dict, extraction_dir: str,
     Returns list of finding dicts.
     """
     findings = []
+    seen_quality_mpns: set = set()
 
     for comp in components:
         if comp.get("type") != "ic":
@@ -239,6 +267,11 @@ def verify_required_externals(components: list, nets: dict, extraction_dir: str,
             continue
 
         extraction = _load_extraction(extraction_dir, mpn)
+        if mpn not in seen_quality_mpns:
+            seen_quality_mpns.add(mpn)
+            qf = _quality_finding(mpn, extraction)
+            if qf:
+                findings.append(qf)
         if not extraction or not extraction.get("pins"):
             continue
 
@@ -372,6 +405,7 @@ def verify_decoupling(components: list, nets: dict, extraction_dir: str,
     Returns list of finding dicts.
     """
     findings = []
+    seen_quality_mpns: set = set()
 
     for comp in components:
         if comp.get("type") != "ic":
@@ -382,6 +416,11 @@ def verify_decoupling(components: list, nets: dict, extraction_dir: str,
             continue
 
         extraction = _load_extraction(extraction_dir, mpn)
+        if mpn not in seen_quality_mpns:
+            seen_quality_mpns.add(mpn)
+            qf = _quality_finding(mpn, extraction)
+            if qf:
+                findings.append(qf)
         if not extraction or not extraction.get("application_circuit"):
             continue
         app_circuit = extraction["application_circuit"]
