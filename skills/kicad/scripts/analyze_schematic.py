@@ -341,6 +341,16 @@ def extract_lib_symbols(root: list) -> dict:
     return symbols
 
 
+# KiCad Y-down base TRANSFORM matrix (x1,y1,x2,y2) per (at .. angle),
+# from sch_io_kicad_sexpr_parser.cpp:3490-3497 (parseSchematicSymbol T_at).
+_ANGLE_TRANSFORM = {
+    0:   (1, 0, 0, 1),
+    90:  (0, 1, -1, 0),
+    180: (-1, 0, 0, -1),
+    270: (0, -1, 1, 0),
+}
+
+
 def apply_rotation(px: float, py: float, angle_deg: float) -> tuple[float, float]:
     """Apply rotation to a pin offset. KiCad uses degrees, CCW positive."""
     # EQ-065: x'=x·cosθ-y·sinθ, y'=x·sinθ+y·cosθ (2D rotation)
@@ -392,12 +402,21 @@ def compute_pin_positions(component: dict, lib_symbols: dict) -> list[dict]:
             rpx = a * px + b * py
             rpy = c * px + d * py
         else:
-            # KiCad 6+: decomposed angle + mirror
-            if mirror_x:
-                py = -py
-            if mirror_y:
-                px = -px
-            rpx, rpy = apply_rotation(px, py, angle)
+            # KiCad 6+: decomposed angle + mirror. Compose exactly as KiCad does
+            # so rotation+mirror combos match (mirror inverts rotation handedness).
+            # KiCad builds a Y-down 2x2 TRANSFORM: the (at .. angle) sets the base
+            # rotation matrix, then (mirror x|y) is composed ON THE RIGHT via
+            # new = old * mirror (sch_symbol.cpp:SetOrientation, lines 2937-2941).
+            # TransformCoordinate(P)=(x1*Px+y1*Py, x2*Px+y2*Py) (kimath transform.cpp:40-43).
+            # We work in math-up offsets (Py positive = up), so convert the Y-down
+            # result back: rpx = x1*px - y1*py, rpy = -x2*px + y2*py.
+            x1, y1, x2, y2 = _ANGLE_TRANSFORM.get(int(angle) % 360, (1, 0, 0, 1))
+            if mirror_x:  # compose with SYM_MIRROR_X temp = (1,0,0,-1) on the right
+                x1, y1, x2, y2 = x1, y1, -x2, -y2
+            if mirror_y:  # compose with SYM_MIRROR_Y temp = (-1,0,0,1) on the right
+                x1, y1, x2, y2 = -x1, -y1, x2, y2
+            rpx = x1 * px - y1 * py
+            rpy = -x2 * px + y2 * py
 
         # Absolute position: Y-axis inversion (symbol coords are math-up, schematic is screen-down)
         abs_x = round(cx + rpx, 4)
