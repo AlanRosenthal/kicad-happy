@@ -190,23 +190,23 @@ The analysis scripts are **pure Python 3.10+** with zero required dependencies. 
 
 ### Release candidates
 
-The stable install commands above always resolve to the latest stable release on `main` (currently v1.3.1). To opt into a release candidate for testing, append `#<tag>` to the marketplace ref:
+The stable install commands above always resolve to the latest stable release on `main` (currently v2.0.0). When a release candidate is active, opt in by appending `#<tag>` to the marketplace ref:
 
 **Claude Code:**
 
 ```
-/plugin marketplace add aklofas/kicad-happy#v1.4.0-rc.1
+/plugin marketplace add aklofas/kicad-happy#vX.Y.Z-rc.N
 /plugin install kicad-happy@kicad-happy
 ```
 
-This pins to the rc.1 tag. Stable users on the un-suffixed marketplace are unaffected. To switch back to stable, remove the marketplace and re-add it without the `#` suffix.
+This pins to the RC tag. Stable users on the un-suffixed marketplace are unaffected. To switch back to stable, remove the marketplace and re-add it without the `#` suffix.
 
-**Codex / Gemini CLI / opencode:** clone the repo and check out the `v1.4.0-rc.1` tag before running the install above:
+**Codex / Gemini CLI / opencode:** clone the repo and check out the RC tag before running the install above:
 
 ```bash
 git clone https://github.com/aklofas/kicad-happy.git
 cd kicad-happy
-git checkout v1.4.0-rc.1
+git checkout vX.Y.Z-rc.N
 # then run the symlink install for your agent
 ```
 
@@ -431,9 +431,34 @@ Or set up the [GitHub Action](github-action.md) and get automated analysis on ev
 | KiCad 6  | Full                          | Full | Full   |
 | KiCad 5  | Full (legacy `.sch` + `.lib`) | Full | Full   |
 
-## 🎯 v1.4 — Datasheet Extraction (release candidate)
+## 🎯 v2.0 — Deep Review
 
-> Currently shipping as `v1.4.0-rc.1` (2026-05-15). Final `v1.4.0` follows extended manual validation. Stable users on the un-suffixed marketplace stay on v1.3.1 — see [Release candidates](#release-candidates) to opt in.
+First stable release since v1.3.2. It absorbs the v1.4 release-candidate line (which closes without a standalone final — see the next section for what that line introduced) and adds the Deep Review pass on top.
+
+**The direction change.** The v1.4 RCs shipped an LLM review layer that annotated analyzer findings — confirm, suppress, escalate, with severity caps and a merge pipeline. Real-project testing showed that structure added complexity without adding correctness, and the grown skill instructions measurably degraded how well models followed them. v2.0 removes that layer and replaces it with something narrower and more defensible: **Deep Review**, a per-IC comparison of how each part is actually wired in your schematic against its datasheet. Its findings are durable (`analysis/deep_review.json`) and must pass an **evidence gate** before they count: every finding has to cite at least one design anchor that exists in the analyzer output (component, net, or pin) and at least one evidence source — a verbatim datasheet quote verified against the PDF text, or a computation script that exists on disk. Findings that fail are quarantined visibly with a reason, never silently dropped. The gate bounds what a review can *claim*; like any agent-driven pass, what it *finds* still varies run to run.
+
+**The correctness fix worth upgrading for.** Pin positions of schematic symbols that are both mirrored and rotated were computed with the wrong transform order. The fix derives the matrix composition from KiCad's own eeschema source and is validated against a 48-case oracle fixture. Across the 5,857-repo validation corpus it corrected the pin-to-net mapping in **1,074 repos (18%)**. **Upgrade note:** if your design uses mirrored+rotated symbols, expect finding churn on upgrade — net names may change and pull-up / LED-resistor / power-pin findings may appear or disappear. The pre-v2.0 versions of those findings were computed from wrong pin-net maps.
+
+Why a major version: a skill is removed (kidoc, since the rc.2 line), analyzer output changes on real designs (the mirror fix), and the review architecture is replaced.
+
+**Highlights:**
+
+| Category | What changed |
+| --- | --- |
+| **Deep Review** | Per-IC usage-vs-datasheet review pass with an evidence gate (`deep_review_gate.py`): schema validation → citation checks (components/nets/pins against analyzer output, quotes against PDF text, computation scripts against disk) → stable finding IDs → visible quarantine. Nets can be cited by schematic name, display name, or PCB net name. |
+| **Mirrored+rotated pin transform** | Correct KiCad matrix composition; oracle-validated (48/48); corrected pin-net mapping in 1,074/5,857 corpus repos. |
+| **Facts stay deterministic, gates get honest** | Datasheet feature lookups now return facts with a `quality` flag instead of silently returning nothing below a threshold; low-quality or unverifiable extractions produce visible info findings (`extraction_quality_low`, `extraction_not_verifiable`) instead of silent no-ops. |
+| **Leaner skill core** | The main `kicad` skill instructions were rebuilt from the v1.3 text under a hard instruction budget — the v1.4 growth measurably hurt model compliance. |
+| **Removed** | The v1.4 Layer-2 review pipeline (severity tuning, merge step, reviewer prompt) and the kidoc skill (removed in rc.2; source in git history at `v1.3.1`). |
+| **Carried from the v1.4 RC line** | Schema-driven datasheet extraction with page-anchored evidence, 11 detectors with datasheet authority, provenance (`inputs`) + compatibility (`compat`) envelope blocks, opencode platform support, JLCPCB pick-and-place translator in the bom skill, rule IDs LA-004 / RS-003 / LC-007. |
+
+Validation: full-corpus regression gate strict-clean (5,857 repos / 170,014 assertion units, zero deltas outside the budgeted mirror correction), 659-test schema contract suite, and an A/B design review of a real board against the v1.3 baseline before tagging.
+
+See the full [CHANGELOG](CHANGELOG.md) for details.
+
+## 🎯 v1.4 — Datasheet Extraction (RC line — closed into v2.0)
+
+> Shipped as `v1.4.0-rc.1` and `v1.4.0-rc.2` for opt-in testing. No standalone `v1.4.0` final was released — the line closed into v2.0, which carries all of it except the Layer-2 review pipeline. This section stands as the record of what the RC line introduced.
 
 v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** detectors consume from. Schema-driven structured extraction replaces ad-hoc PDF scraping; every value carries page-anchored evidence and a confidence label; per-detector trust gating lets analyzers downgrade or suppress findings based on source quality. A separate LLM review layer sits on top of analyzer findings — optional, additive, and provably non-destructive (strip the overlay and the byte-identical baseline returns).
 

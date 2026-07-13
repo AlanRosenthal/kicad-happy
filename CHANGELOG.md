@@ -6,6 +6,94 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
+## v2.0.0 — 2026-07-12
+
+**Theme: Deep Review — judgment moves to the model, facts stay deterministic.**
+
+First stable release since v1.3.2. Absorbs the v1.4 release-candidate line,
+which closes without a standalone final: everything the RCs introduced ships
+here except the Layer-2 review pipeline, which is replaced (see below).
+
+### Deep Review (new)
+
+A per-IC review pass that compares how each part is actually wired in the
+schematic against its datasheet, producing durable findings in
+`analysis/deep_review.json`. Findings only count after passing an evidence
+gate (`skills/kicad/review/scripts/deep_review_gate.py`):
+
+- **Schema validation** per finding — invalid findings are quarantined, not fatal.
+- **Design anchors** — every cited component/net/pin must exist in the analyzer
+  output. Nets can be cited by any of their three identities: schematic
+  internal name, the analyzer's `display_name` annotation, or the PCB net name.
+- **Evidence sources** — every finding needs a verbatim datasheet quote
+  (verified against the PDF text via `pdftotext`; tolerant of case, whitespace,
+  punctuation, Unicode variants, and line-wrap hyphenation — but a quote that
+  isn't in the PDF fails) and/or a computation script that exists on disk.
+- **Visible quarantine** — failures land in `quarantined[]` with a reason,
+  never silently dropped. Re-running the gate promotes corrected findings.
+
+Deep Review findings carry no rule IDs — they are free-form, evidence-bound
+observations, deliberately outside the deterministic rule registry. The gate
+bounds what a review can claim; like any agent-driven pass, what it finds
+still varies run to run.
+
+### Fixed: mirrored+rotated symbol pin transform
+
+Pin positions of schematic symbols that are both mirrored and rotated were
+computed with the wrong transform order, producing wrong pin-to-net maps.
+The fix derives the matrix composition from KiCad's eeschema source and is
+validated against a 48-case oracle fixture. It corrected the pin-net mapping
+in **1,074 of 5,857 corpus repos (18%)**.
+
+> **Upgrade note:** designs using mirrored+rotated symbols will see finding
+> churn coming from v1.3.x — unnamed-net names may change, and pull-up
+> (PU-001), LED-resistor (LR-001), power-pin, voltage-mismatch, feedback,
+> protocol, and crystal findings may appear or disappear. The previous
+> versions of those findings were computed from incorrect pin-net maps.
+
+### Changed: datasheet facts gating
+
+- Feature lookups (`datasheet_features.py`) return facts with a `quality`
+  flag instead of returning nothing below a score threshold; the deterministic
+  detectors that need a floor re-apply it explicitly (their output is
+  byte-identical to before).
+- Low-quality extractions surface as `extraction_quality_low` info findings;
+  extractions that exist but can't be cross-checked surface as
+  `extraction_not_verifiable` — replacing silent no-ops in both cases.
+
+### Removed
+
+- **The v1.4 Layer-2 review pipeline** (severity tuning, merge step, reviewer
+  prompt, `analysis/merged/`). Deep Review replaces it. Analyzer JSON remains
+  byte-identical with or without any LLM involvement.
+- **kidoc skill** (removed in rc.2 — see the v1.4.0-rc.2 entry below for
+  salvage notes; source in git history at `v1.3.1`).
+
+### Changed: leaner skill instructions
+
+The main `kicad` skill text was rebuilt from the v1.3 version under a hard
+instruction budget. The v1.4 instruction growth measurably degraded model
+compliance in side-by-side testing; the rebuild keeps the v1.4-era factual
+corrections without the sprawl.
+
+### Carried from the v1.4 RC line (new to stable users)
+
+Schema-driven datasheet extraction with page-anchored evidence and quality
+scoring; 11 detectors with datasheet authority (5 upgraded + 6 new);
+provenance (`inputs`) and compatibility (`compat`) blocks on every analyzer
+envelope; opencode platform support; JLCPCB pick-and-place translator
+(`translate_pnp`) in the bom skill; rule IDs LA-004, RS-003, LC-007; the
+rc.3-era datasheet-verify crash fixes. See the rc.1/rc.2 entries below.
+
+### Validation
+
+Full-corpus regression gate strict-clean at the release tip (5,857 repos /
+170,014 assertion units; zero deltas outside the budgeted mirror correction),
+659-test schema contract suite, and an A/B design review of a real board
+against the v1.3 baseline before tagging.
+
+---
+
 ## v1.4.0-rc.2 — 2026-05-19
 
 **Theme: Removed kidoc skill + cumulative polish over rc.1.**
