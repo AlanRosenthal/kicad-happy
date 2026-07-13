@@ -477,6 +477,10 @@ v1.3 harmonized analyzer output. v1.4 builds the **datasheet knowledge layer** d
 
 See the full [CHANGELOG](CHANGELOG.md) for details.
 
+## 🎯 v1.3.2 — Bug fix
+
+- Fix `format-report.py` full-report crash on dict-shaped protocol `devices` (#22). The full report's Protocol Compliance section raised `TypeError` when schematic findings carried enriched `{ref, value, lib_id}` device entries (e.g. boards with named I2C buses); it now coerces them the same way the short report already did. Thanks to @krisztiankurucz.
+
 ## 🎯 v1.3.1 — Bug fixes + Connectivity
 
 Patch release: `format-report.py` dict-shaped `power_rails` crash fix (#16, #20), Altium `top_level_sheets` flat multi-page support (#19), PCB connectivity rewrite (track-as-node, compound pads, `*.Cu` wildcards), pad rotation sign fix, LED-driver false-positive suppression on parser-unreadable resistor values (KH-147), Python 3.10 minimum.
