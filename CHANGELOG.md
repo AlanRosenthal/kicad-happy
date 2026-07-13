@@ -179,7 +179,7 @@ and the consumer API (Tracks 2.1–2.6). The full v1.4 story — including
 Phase 3 (extraction pipeline thin slice + 5 category extensions) and
 Phase 4 (foundation infra, Layer 2 review architecture, 5 upgraded
 detectors, 6 new detectors, end-to-end exercise) — is in the
-[README v1.4 section](README.md#-v14--datasheet-extraction-v2-release-candidate).
+[release-notes.md v1.4 section](release-notes.md#-v14--datasheet-extraction-rc-line--closed-into-v20).
 
 ### Other changes
 
