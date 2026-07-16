@@ -6326,14 +6326,73 @@ def analyze_sleep_current(ctx: AnalysisContext,
 
         # Pull-up resistor: one side to power rail, other side to a signal net
         if is_power_net(n1) and not is_ground(n1) and not is_power_net(n2):
-            pwr_net = n1
+            pwr_net, sig_net = n1, n2
         elif is_power_net(n2) and not is_ground(n2) and not is_power_net(n1):
-            pwr_net = n2
+            pwr_net, sig_net = n2, n1
         else:
             continue
 
         v_rail = _estimate_rail_voltage(pwr_net)
-        if v_rail and v_rail > 0:
+        if not v_rail or v_rail <= 0:
+            continue
+
+        # KH-342: classify the signal side before assuming worst-case V/R.
+        # A second resistor to ground makes this a divider (DC = V/(R1+R2));
+        # a shunt cap with no other DC sink makes it an RC filter (DC ~ 0).
+        divider_r2_ref = None
+        divider_r2_ohm = None
+        has_shunt_cap = False
+        has_other_dc_sink = False
+        if sig_net in nets:
+            for p in nets[sig_net]["pins"]:
+                if p["component"] == ref:
+                    continue
+                oc = comp_lookup.get(p["component"])
+                if not oc:
+                    continue
+                o_type = oc.get("type")
+                if o_type == "resistor":
+                    o1, o2 = _get_two_pin_nets(oc["reference"])
+                    o_other = o2 if o1 == sig_net else o1
+                    o_val = parse_value(oc.get("value", ""))
+                    if o_other and is_ground(o_other) and o_val and o_val > 0:
+                        if divider_r2_ref is None:
+                            divider_r2_ref = oc["reference"]
+                            divider_r2_ohm = o_val
+                    else:
+                        has_other_dc_sink = True
+                elif o_type == "capacitor":
+                    o1, o2 = _get_two_pin_nets(oc["reference"])
+                    o_other = o2 if o1 == sig_net else o1
+                    if o_other and is_ground(o_other):
+                        has_shunt_cap = True
+                elif o_type in ("switch", "led", "diode", "transistor"):
+                    has_other_dc_sink = True
+
+        if divider_r2_ref:
+            current_a = v_rail / (r_val + divider_r2_ohm)
+            rail_currents.setdefault(pwr_net, []).append({
+                "ref": ref,
+                "value": comp["value"],
+                "type": "divider",
+                "resistance_ohm": r_val,
+                "divider_partner": divider_r2_ref,
+                "total_resistance_ohm": round(r_val + divider_r2_ohm, 1),
+                "rail_voltage": v_rail,
+                "current_uA": round(current_a * 1e6, 2),
+                "note": f"divider with {divider_r2_ref}: I = V/(R1+R2)",
+            })
+        elif has_shunt_cap and not has_other_dc_sink:
+            rail_currents.setdefault(pwr_net, []).append({
+                "ref": ref,
+                "value": comp["value"],
+                "type": "rc_filter",
+                "resistance_ohm": r_val,
+                "rail_voltage": v_rail,
+                "current_uA": 0.0,
+                "note": "series-R + shunt-C, no DC load — steady-state ~ 0",
+            })
+        else:
             # Pull-up: worst case current is V/R (pin driven low)
             current_a = v_rail / r_val
             rail_currents.setdefault(pwr_net, []).append({
@@ -6520,6 +6579,16 @@ def analyze_sleep_current(ctx: AnalysisContext,
                 else:
                     e["likely_state"] = "always conducting"
                     e["realistic_uA"] = e["current_uA"]
+            elif etype == "divider":
+                if rail in _disableable_rails:
+                    e["likely_state"] = "rail disabled during sleep"
+                    e["realistic_uA"] = 0.0
+                else:
+                    e["likely_state"] = "always conducting"
+                    e["realistic_uA"] = e["current_uA"]
+            elif etype == "rc_filter":
+                e["likely_state"] = "no DC path (shunt cap only)"
+                e["realistic_uA"] = 0.0
 
     # Summarize per rail — split always-on vs conditional (pull-ups)
     result_rails = {}
