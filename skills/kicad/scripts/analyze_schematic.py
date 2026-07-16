@@ -4853,27 +4853,16 @@ def audit_pwr_flags(components: list[dict], nets: dict, known_power_rails: set) 
     """
     warnings = []
 
-    # Find nets with PWR_FLAG
-    flagged_nets = set()
-    for c in components:
-        if c["type"] == "power_flag" or (c["type"] == "flag" and "PWR_FLAG" in c.get("lib_id", "")):
-            # PWR_FLAG connects to whatever net its pin is on
-            for pin in c.get("pins", []):
-                px, py = pin["x"], pin["y"]
-                # Find which net this pin is on
-                for net_name, net_info in nets.items():
-                    for p in net_info["pins"]:
-                        if p["component"] == c["reference"]:
-                            flagged_nets.add(net_name)
-
     # Check each power rail (sorted: set order is hash-randomized per
     # process and pwr_flag_warnings must be byte-stable across runs)
     for net_name in sorted(known_power_rails):
-        if net_name in flagged_nets:
-            continue
         if net_name not in nets:
             continue
         net_info = nets[net_name]
+        # KH-354: PWR_FLAG pins never appear in pins[] (build_net_map
+        # registers them as source points) — credit the net-level flag.
+        if net_info.get("has_pwr_flag"):
+            continue
         pin_types = set(p["pin_type"] for p in net_info["pins"])
 
         # If the net has only power_in pins (no power_out), it needs PWR_FLAG
