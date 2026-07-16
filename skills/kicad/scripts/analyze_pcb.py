@@ -5807,6 +5807,36 @@ def analyze_silkscreen_pad_overlaps(footprints: list[dict], board_texts: list[di
     return findings
 
 
+def _point_in_pad(vx: float, vy: float, px: float, py: float,
+                  width: float, height: float, shape: str,
+                  pad_angle: float) -> bool:
+    """Point-in-pad test for VP-001 (KH-340): circle/oval exact, other
+    shapes as a rotated bounding rect. Pad `at` angles in .kicad_pcb are
+    absolute (they already include the footprint rotation)."""
+    dx = vx - px
+    dy = vy - py
+    if pad_angle:
+        # Inverse of the local->absolute rotation used in extract_footprints
+        rad = math.radians(-pad_angle)
+        c, s = math.cos(rad), math.sin(rad)
+        dx, dy = dx * c + dy * s, -dx * s + dy * c
+    hw = width / 2
+    hh = height / 2
+    if shape == "circle":
+        r = max(hw, hh)
+        return dx * dx + dy * dy <= r * r
+    if shape == "oval":
+        # Stadium: center rect capped by semicircles of radius min(hw, hh)
+        r = min(hw, hh)
+        if hw >= hh:
+            cx = max(abs(dx) - (hw - r), 0.0)
+            return cx * cx + dy * dy <= r * r
+        cy = max(abs(dy) - (hh - r), 0.0)
+        return dx * dx + cy * cy <= r * r
+    # rect / roundrect / trapezoid / custom: rotated bounding rect
+    return abs(dx) <= hw and abs(dy) <= hh
+
+
 def analyze_via_in_pad(footprints: list[dict], vias: dict, thermal_pad_refs: set) -> list[dict]:
     """VP-001: Detect vias inside SMD pads that aren't tented."""
     findings: list[dict] = []
@@ -5832,21 +5862,22 @@ def analyze_via_in_pad(footprints: list[dict], vias: dict, thermal_pad_refs: set
             py = pad.get("abs_y")
             if px is None or py is None:
                 continue
-            hw = pad.get("width", 0) / 2
-            hh = pad.get("height", 0) / 2
-            if hw <= 0 or hh <= 0:
+            pw = pad.get("width", 0)
+            ph = pad.get("height", 0)
+            if pw <= 0 or ph <= 0:
                 continue
             pad_num = pad.get("number", "?")
             smd_pads.append((ref, pad_num, pad.get("net_name", ""),
-                             px - hw, py - hh, px + hw, py + hh))
+                             px, py, pw, ph,
+                             pad.get("shape", "rect"), pad.get("angle", 0)))
 
     for via in via_list:
         vx = via.get("x")
         vy = via.get("y")
         if vx is None or vy is None:
             continue
-        for ref, pad_num, net, x1, y1, x2, y2 in smd_pads:
-            if x1 <= vx <= x2 and y1 <= vy <= y2:
+        for ref, pad_num, net, ppx, ppy, pw, ph, pshape, pangle in smd_pads:
+            if _point_in_pad(vx, vy, ppx, ppy, pw, ph, pshape, pangle):
                 # Check tenting
                 via_layers = via.get("layers", [])
                 # A via is tented if it has solder mask coverage (heuristic: look for F.Mask/B.Mask)
