@@ -14,6 +14,7 @@ from kicad_utils import (
     format_frequency as _format_frequency,
     is_ground_name,
     is_power_net_name,
+    is_usb_data_net_name,
     lookup_regulator_vref as _lookup_regulator_vref,
     lookup_switching_freq,
     match_known_switching as _match_known_switching,
@@ -1544,7 +1545,10 @@ def _infer_rail_voltage(net_name):
     m = re.match(r'[+]?(\d+\.?\d*)V', name)
     if m:
         return float(m.group(1))
-    if "VBUS" in name or "USB" in name:
+    if "VBUS" in name:
+        return 5.0
+    # KH-343: only non-data USB nets (VBUS-ish) default to 5V
+    if "USB" in name and not is_usb_data_net_name(name):
         return 5.0
     if "VBAT" in name:
         return 3.7

@@ -46,6 +46,7 @@ from kicad_utils import (
     format_frequency as _format_frequency,
     load_lib_tables,
     is_ground_name as _is_ground_name,
+    is_usb_data_net_name,
     is_power_net_name as _is_power_net_name,
     load_kicad_pro,
     parse_value,
@@ -4735,7 +4736,10 @@ def _estimate_rail_voltage(net_name: str) -> float | None:
     if v is not None:
         return v
     # Hardcoded fallbacks for common names without voltage numbers
-    if "VBUS" in nu or "USB" in nu:
+    if "VBUS" in nu:
+        return 5.0
+    # KH-343: only non-data USB nets (VBUS-ish) default to 5V
+    if "USB" in nu and not is_usb_data_net_name(nu):
         return 5.0
     return None
 
