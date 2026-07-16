@@ -772,8 +772,20 @@ def extract_footprints(root: list) -> list[dict]:
 
             pads.append(pad_info)
 
-        # Extract courtyard bounding box (absolute coordinates)
+        # Extract courtyard geometry: bounding box + chained outline polygons
         crtyd_pts: list[tuple[float, float]] = []
+        crtyd_segs: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        crtyd_polys: list[list[tuple[float, float]]] = []
+        crtyd_unchainable = False  # arcs/circles → polygon set would be incomplete
+
+        def _fp_to_abs(lx: float, ly: float) -> tuple[float, float]:
+            if angle != 0:
+                rad = math.radians(-angle)
+                rx = lx * math.cos(rad) - ly * math.sin(rad)
+                ry = lx * math.sin(rad) + ly * math.cos(rad)
+                lx, ly = rx, ry
+            return (x + lx, y + ly)
+
         for gtype in ("fp_line", "fp_rect", "fp_circle", "fp_poly", "fp_arc"):
             for item in find_all(fp, gtype):
                 item_layer = get_value(item, "layer")
@@ -783,27 +795,48 @@ def extract_footprints(root: list) -> list[dict]:
                 if gtype == "fp_poly":
                     pts = find_first(item, "pts")
                     if pts:
+                        poly = []
                         for xy in find_all(pts, "xy"):
                             if len(xy) >= 3:
-                                lx, ly = float(xy[1]), float(xy[2])
-                                if angle != 0:
-                                    rad = math.radians(-angle)
-                                    rx = lx * math.cos(rad) - ly * math.sin(rad)
-                                    ry = lx * math.sin(rad) + ly * math.cos(rad)
-                                    lx, ly = rx, ry
-                                crtyd_pts.append((x + lx, y + ly))
+                                poly.append(_fp_to_abs(float(xy[1]), float(xy[2])))
+                        if len(poly) >= 3:
+                            crtyd_polys.append(poly)
+                        crtyd_pts.extend(poly)
                     continue
+                if gtype == "fp_line":
+                    p1 = find_first(item, "start")
+                    p2 = find_first(item, "end")
+                    if p1 and p2 and len(p1) >= 3 and len(p2) >= 3:
+                        seg_a = _fp_to_abs(float(p1[1]), float(p1[2]))
+                        seg_b = _fp_to_abs(float(p2[1]), float(p2[2]))
+                        crtyd_segs.append((seg_a, seg_b))
+                        crtyd_pts.extend((seg_a, seg_b))
+                    continue
+                if gtype == "fp_rect":
+                    p1 = find_first(item, "start")
+                    p2 = find_first(item, "end")
+                    if p1 and p2 and len(p1) >= 3 and len(p2) >= 3:
+                        sx, sy = float(p1[1]), float(p1[2])
+                        ex, ey = float(p2[1]), float(p2[2])
+                        corners = [_fp_to_abs(cx_, cy_) for cx_, cy_ in
+                                   ((sx, sy), (ex, sy), (ex, ey), (sx, ey))]
+                        crtyd_polys.append(corners)
+                        crtyd_pts.extend(corners)
+                    continue
+                # fp_circle / fp_arc: bbox contribution only — polygon set
+                # stays disabled so overlap falls back to the AABB (KH-350)
+                crtyd_unchainable = True
                 for key in ("start", "end", "center", "mid"):
                     node = find_first(item, key)
                     if node and len(node) >= 3:
-                        lx, ly = float(node[1]), float(node[2])
-                        # Transform to absolute coordinates
-                        if angle != 0:
-                            rad = math.radians(-angle)
-                            rx = lx * math.cos(rad) - ly * math.sin(rad)
-                            ry = lx * math.sin(rad) + ly * math.cos(rad)
-                            lx, ly = rx, ry
-                        crtyd_pts.append((x + lx, y + ly))
+                        crtyd_pts.append(_fp_to_abs(float(node[1]), float(node[2])))
+
+        if crtyd_segs and not crtyd_unchainable:
+            _chained = _chain_segments(crtyd_segs)
+            if _chained:
+                crtyd_polys.extend(_chained)
+            else:
+                crtyd_unchainable = True
 
         fp_entry: dict = {
             "library": fp_lib,
@@ -860,10 +893,85 @@ def extract_footprints(root: list) -> list[dict]:
                 "min_x": round(min(cxs), 3), "min_y": round(min(cys), 3),
                 "max_x": round(max(cxs), 3), "max_y": round(max(cys), 3),
             }
+            if crtyd_polys and not crtyd_unchainable:
+                fp_entry["courtyard_poly"] = [
+                    [[round(vx_, 3), round(vy_, 3)] for vx_, vy_ in poly]
+                    for poly in crtyd_polys
+                ]
 
         footprints.append(fp_entry)
 
     return footprints
+
+
+def _chain_segments(segs: list, tol: float = 0.01) -> list | None:
+    """Chain undirected 2D segments into closed loops (KH-350).
+
+    Returns a list of polygons (each a list of (x, y) vertices, implicit
+    closure) or None when any chain fails to close within tolerance —
+    callers then keep the AABB-only behavior.
+    """
+    def _close(p, q):
+        return abs(p[0] - q[0]) <= tol and abs(p[1] - q[1]) <= tol
+
+    remaining = [s for s in segs if not _close(s[0], s[1])]
+    polys = []
+    while remaining:
+        a, b = remaining.pop()
+        path = [a, b]
+        while not _close(path[0], path[-1]):
+            tail = path[-1]
+            for i, (p, q) in enumerate(remaining):
+                if _close(p, tail):
+                    path.append(q)
+                    break
+                if _close(q, tail):
+                    path.append(p)
+                    break
+            else:
+                return None  # open chain
+            remaining.pop(i)
+        poly = path[:-1]
+        if len(poly) < 3:
+            return None
+        polys.append(poly)
+    return polys
+
+
+def _point_in_polys(px: float, py: float, polys: list) -> bool:
+    """Even-odd ray-casting membership over a list of polygons."""
+    inside = False
+    for poly in polys:
+        n = len(poly)
+        j = n - 1
+        for i in range(n):
+            xi, yi = poly[i][0], poly[i][1]
+            xj, yj = poly[j][0], poly[j][1]
+            if (yi > py) != (yj > py):
+                if px < (xj - xi) * (py - yi) / (yj - yi) + xi:
+                    inside = not inside
+            j = i
+    return inside
+
+
+def _refined_overlap_mm2(polys_a: list, polys_b: list,
+                         ix1: float, iy1: float, ix2: float, iy2: float,
+                         samples: int = 24) -> float:
+    """True courtyard overlap area inside the AABB-intersection box,
+    estimated by grid-sampling membership in both polygon sets (KH-350)."""
+    w = ix2 - ix1
+    h = iy2 - iy1
+    if w <= 0 or h <= 0:
+        return 0.0
+    hits = 0
+    for i in range(samples):
+        px = ix1 + (i + 0.5) * w / samples
+        for j in range(samples):
+            py = iy1 + (j + 0.5) * h / samples
+            if (_point_in_polys(px, py, polys_a)
+                    and _point_in_polys(px, py, polys_b)):
+                hits += 1
+    return w * h * hits / (samples * samples)
 
 
 def extract_tracks(root: list) -> dict:
@@ -3474,6 +3582,21 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                 ox = min(cy_a["max_x"], cy_b["max_x"]) - max(cy_a["min_x"], cy_b["min_x"])
                 oy = min(cy_a["max_y"], cy_b["max_y"]) - max(cy_a["min_y"], cy_b["min_y"])
                 overlap_mm2 = round(ox * oy, 3)
+                # KH-350: AABB is only a pre-filter — notched courtyards
+                # (QFP cross shapes) fill their corners in bbox space. With
+                # chained polygons on both parts, measure the true overlap.
+                _polys_a = fp_a.get("courtyard_poly")
+                _polys_b = fp_b.get("courtyard_poly")
+                if _polys_a and _polys_b:
+                    _refined = _refined_overlap_mm2(
+                        _polys_a, _polys_b,
+                        max(cy_a["min_x"], cy_b["min_x"]),
+                        max(cy_a["min_y"], cy_b["min_y"]),
+                        min(cy_a["max_x"], cy_b["max_x"]),
+                        min(cy_a["max_y"], cy_b["max_y"]))
+                    if _refined <= 0.0:
+                        continue
+                    overlap_mm2 = round(_refined, 3)
                 is_rf_overlap = _is_rf_module(fp_a) or _is_rf_module(fp_b)
                 # RF module courtyards deliberately encode the antenna RF
                 # keepout (e.g., ESP32-S3-WROOM-1 extends ~7mm past the body
