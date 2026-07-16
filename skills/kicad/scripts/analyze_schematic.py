@@ -4866,8 +4866,9 @@ def audit_pwr_flags(components: list[dict], nets: dict, known_power_rails: set) 
                         if p["component"] == c["reference"]:
                             flagged_nets.add(net_name)
 
-    # Check each power rail
-    for net_name in known_power_rails:
+    # Check each power rail (sorted: set order is hash-randomized per
+    # process and pwr_flag_warnings must be byte-stable across runs)
+    for net_name in sorted(known_power_rails):
         if net_name in flagged_nets:
             continue
         if net_name not in nets:
