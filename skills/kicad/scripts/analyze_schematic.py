@@ -7954,6 +7954,7 @@ def analyze_usb_compliance(ctx: AnalysisContext,
         return {}
 
     checklist = []
+    usb_findings: list[dict] = []
 
     for conn in usb_connectors:
         ref = conn["ref"]
@@ -8157,6 +8158,11 @@ def analyze_usb_compliance(ctx: AnalysisContext,
                 vbus_net = net_name
                 break
 
+        # Shared ESD-part keyword list: vbus_esd_protection credit (KH-338)
+        # + the usb_esd_ic check below.
+        esd_keywords = ("usblc", "prtr5v", "ip4", "sp0", "tpd", "esd", "pesd",
+                        "rclamp", "nup", "lesd")
+
         if vbus_net and vbus_net in nets:
             # ESD/TVS on VBUS
             has_esd = False
@@ -8171,6 +8177,14 @@ def analyze_usb_compliance(ctx: AnalysisContext,
                     lib_lower = pc.get("lib_id", "").lower()
                     if any(k in val_lower or k in lib_lower
                            for k in ("tvs", "esd", "smaj", "smbj", "p6ke")):
+                        has_esd = True
+                elif pc["type"] == "ic":
+                    # KH-338: ESD arrays (USBLC6 etc.) protect VBUS through
+                    # their own VBUS pin — credit them even when the net is
+                    # unnamed (resolution is by connector pin, not net name).
+                    _combined = (pc.get("value", "") + " "
+                                 + pc.get("lib_id", "")).lower()
+                    if any(k in _combined for k in esd_keywords):
                         has_esd = True
                 if pc["type"] == "capacitor":
                     has_decoupling = True
@@ -8207,8 +8221,6 @@ def analyze_usb_compliance(ctx: AnalysisContext,
 
         # --- USB ESD protection ICs ---
         esd_ic_found = False
-        esd_keywords = ("usblc", "prtr5v", "ip4", "sp0", "tpd", "esd", "pesd",
-                        "rclamp", "nup", "lesd")
         for comp_c in components:
             if comp_c["type"] not in ("ic", "diode"):
                 continue
@@ -8223,6 +8235,84 @@ def analyze_usb_compliance(ctx: AnalysisContext,
                     break
 
         conn_checks["checks"]["usb_esd_ic"] = "pass" if esd_ic_found else "info"
+
+        # KH-338: promote failed checks to rich findings so they reach
+        # findings[] / summaries instead of living only in this aux section.
+        _uc_specs = {
+            "vbus_decoupling": (
+                "UC-001",
+                f"No decoupling capacitor on VBUS at {ref}",
+                f"USB connector {ref}: no capacitor found on the VBUS net. "
+                f"USB 2.0 recommends >=1uF bulk + 100nF local decoupling on VBUS.",
+                f"Add bulk (>=1uF) + 100nF decoupling on VBUS near {ref}.",
+                [vbus_net] if vbus_net else [],
+            ),
+            "vbus_esd_protection": (
+                "UC-002",
+                f"No ESD/TVS protection on VBUS at {ref}",
+                f"USB connector {ref}: no TVS diode or ESD array found on the "
+                f"VBUS net. VBUS is exposed to external ESD/surge events.",
+                f"Add a TVS diode or ESD array on VBUS at {ref}.",
+                [vbus_net] if vbus_net else [],
+            ),
+            "cc1_pulldown_5k1": (
+                "UC-003",
+                f"CC1 missing 5.1k pull-down at {ref}",
+                f"USB-C sink {ref}: CC1 has no 5.1k pull-down to GND and no "
+                f"PD controller was found. A source will not present VBUS.",
+                f"Add a 5.1k pull-down on CC1 (or a PD controller) at {ref}.",
+                [],
+            ),
+            "cc2_pulldown_5k1": (
+                "UC-003",
+                f"CC2 missing 5.1k pull-down at {ref}",
+                f"USB-C sink {ref}: CC2 has no 5.1k pull-down to GND and no "
+                f"PD controller was found. A source will not present VBUS.",
+                f"Add a 5.1k pull-down on CC2 (or a PD controller) at {ref}.",
+                [],
+            ),
+        }
+        for _check_name, _spec in _uc_specs.items():
+            if conn_checks["checks"].get(_check_name) != "fail":
+                continue
+            _rid, _summary, _desc, _rec, _nets_f = _spec
+            usb_findings.append(make_finding(
+                detector="analyze_usb_compliance",
+                rule_id=_rid,
+                category="usb_compliance",
+                summary=_summary,
+                description=_desc,
+                severity="warning",
+                confidence="deterministic",
+                evidence_source="topology",
+                components=[ref],
+                nets=[n for n in _nets_f if n],
+                recommendation=_rec,
+                report_section="USB Compliance",
+                impact="USB functionality / robustness",
+                check=_check_name,
+            ))
+        if conn_checks["checks"].get("vbus_capacitance") == "warning":
+            _detail = conn_checks.get("vbus_capacitance_detail", {})
+            usb_findings.append(make_finding(
+                detector="analyze_usb_compliance",
+                rule_id="UC-004",
+                category="usb_compliance",
+                summary=(f"VBUS decoupling may be undersized at {ref} "
+                         f"({_detail.get('total_uf')}uF total)"),
+                description=_detail.get(
+                    "detail", "VBUS capacitance below recommended minimum."),
+                severity="warning",
+                confidence="deterministic",
+                evidence_source="topology",
+                components=[ref],
+                nets=[vbus_net] if vbus_net else [],
+                recommendation=(f"Increase VBUS bulk capacitance at {ref} "
+                                f"to >=1uF (USB 2.0)."),
+                report_section="USB Compliance",
+                impact="VBUS droop on connect",
+                check="vbus_capacitance",
+            ))
 
         checklist.append(conn_checks)
 
@@ -8244,6 +8334,8 @@ def analyze_usb_compliance(ctx: AnalysisContext,
         "connectors": checklist,
         "summary": all_checks,
     }
+    if usb_findings:
+        result["findings"] = usb_findings
     if observations:
         result["observations"] = observations
     return result
@@ -9189,6 +9281,10 @@ def analyze_schematic(path: str, project_root: str | None = None,
     # VD-001..004 — component voltage/power derating (rich findings since v1.4)
     if voltage_derating:
         findings.extend(voltage_derating)
+
+    # UC-001..004 — USB compliance check failures (KH-338)
+    if usb_compliance:
+        findings.extend(usb_compliance.pop("findings", []))
 
     # Build severity summary
     sev_counts = {"error": 0, "warning": 0, "info": 0}
