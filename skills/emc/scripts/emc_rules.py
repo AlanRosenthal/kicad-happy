@@ -617,16 +617,24 @@ def check_decoupling_via_distance(pcb: Dict) -> List[Dict]:
                     for fp in footprints}
     fp_by_ref = {fp.get('reference', ''): fp for fp in footprints}
 
-    def _pad_in_same_net_pour(fp: Dict) -> bool:
-        """True if any pad of fp sits inside a same-layer zone of its own
-        net — the pour IS the connection, no via needed (KH-341)."""
+    def _cap_in_same_net_pour(fp: Dict) -> bool:
+        """True if the cap sits inside a same-layer zone of one of its own
+        nets — the pour IS the connection, no via needed (KH-341).
+
+        KH-356: analyzer output strips pad geometry from footprints, so
+        this works from what survives: footprint center + connected_nets
+        (pad_nets fallback). Center containment is a good proxy for a
+        chip cap's pad positions.
+        """
         fp_layer = fp.get('layer', 'F.Cu')
-        for pad in fp.get('pads', []):
-            net = pad.get('net_name')
-            px = pad.get('abs_x')
-            py = pad.get('abs_y')
-            if not net or px is None or py is None:
-                continue
+        fx = fp.get('x')
+        fy = fp.get('y')
+        if fx is None or fy is None:
+            return False
+        cap_nets = fp.get('connected_nets') or [
+            v.get('net') for v in (fp.get('pad_nets') or {}).values()
+            if isinstance(v, dict) and v.get('net')]
+        for net in cap_nets:
             for z in zones:
                 if z.get('net_name') != net:
                     continue
@@ -635,7 +643,7 @@ def check_decoupling_via_distance(pcb: Dict) -> List[Dict]:
                 bbox = z.get('filled_bbox') or z.get('outline_bbox')
                 if not bbox or len(bbox) != 4:
                     continue
-                if bbox[0] <= px <= bbox[2] and bbox[1] <= py <= bbox[3]:
+                if bbox[0] <= fx <= bbox[2] and bbox[1] <= fy <= bbox[3]:
                     return True
         return False
 
@@ -648,7 +656,7 @@ def check_decoupling_via_distance(pcb: Dict) -> List[Dict]:
             cx, cy = fp_positions[cap_ref]
 
             _cap_fp = fp_by_ref.get(cap_ref)
-            if _cap_fp and _pad_in_same_net_pour(_cap_fp):
+            if _cap_fp and _cap_in_same_net_pour(_cap_fp):
                 continue
 
             # Find nearest via to this cap
