@@ -603,9 +603,41 @@ def check_decoupling_via_distance(pcb: Dict) -> List[Dict]:
     if not via_list:
         return findings
 
+    # KH-341: on 2-layer boards the "via to plane" model doesn't apply —
+    # decoupling current returns through pours/traces, not plane vias.
+    layers = pcb.get('layers', [])
+    copper_layer_count = len([l for l in layers
+                              if l.get('type') in ('signal', 'power')])
+    if copper_layer_count == 2:
+        return findings
+
+    zones = pcb.get('zones', [])
     footprints = pcb.get('footprints', [])
     fp_positions = {fp.get('reference', ''): (fp.get('x') or 0, fp.get('y') or 0)
                     for fp in footprints}
+    fp_by_ref = {fp.get('reference', ''): fp for fp in footprints}
+
+    def _pad_in_same_net_pour(fp: Dict) -> bool:
+        """True if any pad of fp sits inside a same-layer zone of its own
+        net — the pour IS the connection, no via needed (KH-341)."""
+        fp_layer = fp.get('layer', 'F.Cu')
+        for pad in fp.get('pads', []):
+            net = pad.get('net_name')
+            px = pad.get('abs_x')
+            py = pad.get('abs_y')
+            if not net or px is None or py is None:
+                continue
+            for z in zones:
+                if z.get('net_name') != net:
+                    continue
+                if fp_layer not in (z.get('layers') or []):
+                    continue
+                bbox = z.get('filled_bbox') or z.get('outline_bbox')
+                if not bbox or len(bbox) != 4:
+                    continue
+                if bbox[0] <= px <= bbox[2] and bbox[1] <= py <= bbox[3]:
+                    return True
+        return False
 
     for entry in decoupling:
         for cap_info in entry.get('nearby_caps', []):
@@ -614,6 +646,10 @@ def check_decoupling_via_distance(pcb: Dict) -> List[Dict]:
                 continue
 
             cx, cy = fp_positions[cap_ref]
+
+            _cap_fp = fp_by_ref.get(cap_ref)
+            if _cap_fp and _pad_in_same_net_pour(_cap_fp):
+                continue
 
             # Find nearest via to this cap
             min_via_dist = float('inf')
