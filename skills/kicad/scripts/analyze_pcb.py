@@ -5332,6 +5332,38 @@ def analyze_thermal_pad_vias(footprints: list[dict], vias: dict,
 _PASSIVE_REF_RE = re.compile(r"^([A-Za-z0-9_]+/)?(C|R|L|FB)\d+$")
 
 
+def _nearest_zone_copper_distance(fx: float, fy: float, fp_layer: str,
+                                  gnd_zones: list) -> tuple:
+    """Distance from a point to the nearest same-layer GND zone copper.
+
+    KH-339: prefers filled_bbox (actual copper) over outline_bbox — the
+    zone outline routinely overstates copper reach. Returns (distance,
+    basis) where basis is 'filled_bbox' or 'outline_bbox' (None if no
+    candidate zone).
+    """
+    min_dist = float('inf')
+    basis = None
+    for gz in gnd_zones:
+        if fp_layer not in gz.get("layers", []):
+            continue
+        gz_basis = "filled_bbox" if gz.get("filled_bbox") else "outline_bbox"
+        bbox = gz.get("filled_bbox") or gz.get("outline_bbox")
+        if not bbox or len(bbox) != 4:
+            continue
+        bx_min, by_min, bx_max, by_max = bbox
+        # EQ-102: d = √((px-zx)² + (py-zy)²) for point-to-zone-pour proximity.
+        # Source: Self-evident — 2D Euclidean distance to the nearest
+        #   axis-aligned bounding-box edge (dx/dy clamped to 0 when the
+        #   point is inside the box on that axis).
+        dx = max(bx_min - fx, 0, fx - bx_max)
+        dy = max(by_min - fy, 0, fy - by_max)
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist < min_dist:
+            min_dist = dist
+            basis = gz_basis
+    return min_dist, basis
+
+
 def analyze_copper_presence(footprints: list[dict], zones: list[dict],
                             zone_fills: ZoneFills,
                             ref_layer_map: dict[str, str] | None = None) -> dict:
@@ -5546,37 +5578,28 @@ def analyze_copper_presence(footprints: list[dict], zones: list[dict],
             continue
         fx, fy = fp.get("x", 0), fp.get("y", 0)
         fp_layer = fp.get("layer", "F.Cu")
-        min_dist = float('inf')
-        for gz in gnd_zones:
-            if fp_layer not in gz.get("layers", []):
-                continue
-            bbox = gz.get("outline_bbox")
-            if not bbox or len(bbox) != 4:
-                continue
-            bx_min, by_min, bx_max, by_max = bbox
-            # EQ-102: d = √((px-zx)² + (py-zy)²) for point-to-zone-pour proximity.
-            # Source: Self-evident — 2D Euclidean distance to the nearest
-            #   axis-aligned bounding-box edge (dx/dy clamped to 0 when the
-            #   point is inside the box on that axis).
-            dx = max(bx_min - fx, 0, fx - bx_max)
-            dy = max(by_min - fy, 0, fy - by_max)
-            dist = math.sqrt(dx * dx + dy * dy)
-            min_dist = min(min_dist, dist)
+        min_dist, _basis = _nearest_zone_copper_distance(fx, fy, fp_layer,
+                                                         gnd_zones)
         if min_dist < float('inf'):
+            _conf = "deterministic" if _basis == "filled_bbox" else "heuristic"
+            _note = ("" if _basis == "filled_bbox" else
+                     " (zone outline basis — fill data unavailable; actual "
+                     "copper may be farther)")
             touch_clearances.append({
                 "ref": ref,
                 "layer": fp_layer,
                 "gnd_clearance_mm": round(min_dist, 2),
+                "measurement_basis": _basis,
                 "detector": "analyze_copper_presence",
                 "rule_id": "CP-003",
                 "category": "copper_integrity",
                 "severity": "info",
-                "confidence": "deterministic",
+                "confidence": _conf,
                 "evidence_source": "geometry",
                 "summary": f"Touch pad {ref} GND clearance {round(min_dist, 2)}mm",
                 "description": (
                     f"Touch pad {ref} on {fp_layer}: {round(min_dist, 2)}mm "
-                    f"clearance to nearest GND zone."
+                    f"clearance to nearest GND zone copper{_note}."
                 ),
                 "components": [ref],
                 "nets": [],
