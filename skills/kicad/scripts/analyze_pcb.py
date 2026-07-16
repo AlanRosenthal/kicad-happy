@@ -5823,6 +5823,11 @@ def analyze_via_in_pad(footprints: list[dict], vias: dict, thermal_pad_refs: set
         for pad in fp.get("pads", []):
             if pad.get("type") != "smd":
                 continue
+            # KH-349: pads "disabled" by clearing all copper layers
+            # (e.g. (layers "Dwgs.User")) can't have via-in-pad issues.
+            _pad_layers = pad.get("layers") or []
+            if _pad_layers and not any(l.endswith(".Cu") for l in _pad_layers):
+                continue
             px = pad.get("abs_x")
             py = pad.get("abs_y")
             if px is None or py is None:
