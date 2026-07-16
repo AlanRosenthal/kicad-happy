@@ -3561,6 +3561,23 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                 else:
                     severity = 'warning'
                     rf_suffix = ''
+                _summary = f"{fp['reference']} is {clearance}mm from board edge{rf_suffix}"
+                _description = (f"Component {fp['reference']} on {fp['layer']} is only "
+                                f"{clearance}mm from the board edge, risking damage "
+                                f"during depaneling or handling.")
+                _recommendation = (f"Move {fp['reference']} further from board edge "
+                                   f"(currently {clearance}mm, recommend >= 1.0mm)")
+                if clearance < 0 and not is_rf and not is_edge_mount:
+                    # KH-344: negative clearance means the courtyard overhangs
+                    # the outline — "move further from edge" is nonsense there.
+                    _summary = (f"{fp['reference']} courtyard overhangs board "
+                                f"edge by {abs(clearance)}mm")
+                    _description = (f"Component {fp['reference']} on {fp['layer']} has "
+                                    f"a courtyard extending {abs(clearance)}mm past the "
+                                    f"board outline. If not intentional (castellated or "
+                                    f"edge-mount part), it will collide with the edge.")
+                    _recommendation = (f"Verify the overhang on {fp['reference']} is "
+                                       f"intentional; if not, place it inside the outline.")
                 edge_close.append({
                     "component": fp["reference"],
                     "layer": fp["layer"],
@@ -3571,12 +3588,12 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                     "severity": severity,
                     "confidence": "deterministic",
                     "evidence_source": "topology",
-                    "summary": f"{fp['reference']} is {clearance}mm from board edge{rf_suffix}",
-                    "description": f"Component {fp['reference']} on {fp['layer']} is only {clearance}mm from the board edge, risking damage during depaneling or handling.",
+                    "summary": _summary,
+                    "description": _description,
                     "components": [fp["reference"]],
                     "nets": [],
                     "pins": [],
-                    "recommendation": f"Move {fp['reference']} further from board edge (currently {clearance}mm, recommend >= 1.0mm)",
+                    "recommendation": _recommendation,
                     "report_context": {"section": "Placement", "impact": "manufacturability", "standard_ref": ""},
                 })
 
