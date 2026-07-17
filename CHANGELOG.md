@@ -6,6 +6,39 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
+## v2.1.0 — 2026-07-17
+
+**Theme: correctness batch — 17 analyzer fixes from field reports, external reviews, and a fork sweep.**
+
+### Fixed
+
+- **#24** — Inner-layer plane connectivity: through/blind vias now expand across the physical stackup order, so inner-only planes (e.g. an In2.Cu power plane) no longer explode into one island per load. Kills spurious PS-002 / GP-001 / RP-002 findings on 4+ layer boards. (Reported by jo95017.)
+- **#28** — VP-001 no longer flags vias in copper-less pads (module pads "disabled" by clearing all copper layers). (Reported by ademuri.)
+- **#29** — Courtyard overlap chains CrtYd primitives into true polygons and measures real overlap; QFP corner-notch phantom overlaps are gone. New additive `courtyard_poly` field on footprints. (Reported by ademuri.)
+- Three fixes ported from **Anya Sabo's fork** (found in a fork sweep, authorship preserved): a stray no-connect marker on a multi-pin net no longer flips every pin to NO_CONNECT; XV-002 skips never-synced boards whose PCB value is the footprint library name; RS-001 recognizes PWR_FLAG as a rail-source declaration (new additive `has_pwr_flag` field on nets).
+- USB compliance check failures now surface as findings — new rule ids **UC-001** (no VBUS decoupling), **UC-002** (no VBUS ESD/TVS), **UC-003** (missing CC pull-down), **UC-004** (undersized VBUS capacitance). ESD arrays (USBLC6-class) now credit VBUS protection even when the VBUS net is unnamed.
+- CP-003 touch-pad clearance measures to filled copper instead of the zone outline; the outline fallback is confidence-downgraded and labeled via a new `measurement_basis` field.
+- VP-001 via-in-pad uses shape- and rotation-aware hit tests (circle/oval exact) instead of the axis-aligned bounding box.
+- DC-003 (decoupling cap far from via) is suppressed on 2-layer boards and for caps tied into a same-layer pour of their own net.
+- Sleep-current audit scores divider legs as one V/(R1+R2) path and series-R + shunt-C networks as ~0 instead of worst-case V/R.
+- Rail-voltage inference no longer maps USB data lines (USB_DP/USB_DM/D+/D-) to 5.0V.
+- PM-002 describes negative clearances as courtyard overhangs instead of advising "move further from board edge".
+- `simulate_subcircuits.py` gains `--text`; the lifecycle `--temp-range` docs show the working `=` form.
+- Per-pin absolute-max verification reads the first voltage SpecValue instead of `[0]`, preventing false CRITICALs from mixed voltage/current rating lists.
+- LCSC-only lifecycle audits state up front that LCSC exposes no lifecycle data instead of emitting per-part "unknown" findings.
+- `pwr_flag_warnings` respects PWR_FLAG (the warning's own remedy now silences it) and is byte-stable across runs (ordering was hash-randomized).
+
+### Validation
+
+- Full-corpus regression gate clean over the whole release range (5,829 repos / 170,014 comparison units, budgeted and adjudicated; evidence retained harness-side). Contract suite: 706 passed / 8 skipped / 4 xfailed.
+
+### Upgrade notes
+
+- Expect finding churn vs v2.0.0 — overwhelmingly false positives disappearing: PS-002/GP-001/RP-002 on inner-plane boards, VP-001, courtyard overlaps, DC-003 on 2-layer boards, PWR_FLAG-related rail-source and ERC warnings. New UC-* findings appear on boards with failing USB checks.
+- Additive JSON fields (no breaking schema changes): `nets[].has_pwr_flag`, `footprints[].courtyard_poly`, CP-003 `measurement_basis`, lifecycle `capability_note`.
+
+---
+
 ## v2.0.0 — 2026-07-12
 
 **Theme: Deep Review — judgment moves to the model, facts stay deterministic.**

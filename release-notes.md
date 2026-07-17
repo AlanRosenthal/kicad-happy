@@ -2,6 +2,14 @@
 
 The story of each kicad-happy release — what changed and why it matters when upgrading. For line-level detail, see the [CHANGELOG](CHANGELOG.md).
 
+## 🔧 v2.1 — Correctness batch
+
+Seventeen analyzer fixes, no new subsystems. This release is what the field asked for: three GitHub reports (#24 inner-plane connectivity, #28/#29 via-in-pad and courtyard false positives), two external review rounds of a real ESP32-S3 board, and a fork sweep that turned up three never-submitted fixes by Anya Sabo (ported with authorship preserved — thank you).
+
+The headline classes: inner power planes no longer fragment into false islands on 4+ layer boards; via-in-pad and courtyard-overlap checks use real geometry instead of bounding boxes; USB compliance failures finally surface as findings (UC-001..UC-004) instead of hiding in an aux section; and a dozen smaller false-positive fixes across sleep current, decoupling, derating, ERC-style warnings, and lifecycle checks.
+
+**Upgrading from v2.0.0:** expect finding churn in exactly those classes — it is overwhelmingly false positives disappearing. Four additive JSON fields (`has_pwr_flag`, `courtyard_poly`, `measurement_basis`, `capability_note`); no breaking schema changes; no skill-instruction changes.
+
 ## 🎯 v2.0 — Deep Review
 
 First stable release since v1.3.2. It absorbs the v1.4 release-candidate line (which closes without a standalone final — see the next section for what that line introduced) and adds the Deep Review pass on top.
