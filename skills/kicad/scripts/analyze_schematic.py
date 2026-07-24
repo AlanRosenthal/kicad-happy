@@ -4586,18 +4586,26 @@ def _detect_differential_pairs(ctx: AnalysisContext) -> list:
         ("_TDP", "_TDN"), ("_RDP", "_RDN"),
     ]
 
-    # Net-name-based detection: find matching suffix pairs
-    net_names_upper = {n.upper(): n for n in nets}
+    # Net-name-based detection: find matching suffix pairs. Key by
+    # (sheet_prefix, display_name.upper()) so a KH-359 sheet-qualified net
+    # (e.g. /s1/USB_P, display_name "USB_P") still pairs by name, but two
+    # same-named nets on *different* sheets never cross-pair.
+    net_names_upper: dict[tuple[str, str], str] = {}
+    for k, v in nets.items():
+        disp = v.get("display_name", k)
+        prefix = k[: -len(disp)] if k.endswith(disp) else ""
+        net_names_upper.setdefault((prefix, disp.upper()), k)
     found_pairs: set[tuple[str, str]] = set()  # track to avoid duplicates
 
     for pos_sfx, neg_sfx in _diff_suffix_pairs:
-        for nu, real_name in net_names_upper.items():
+        for (prefix, nu), real_name in net_names_upper.items():
             if nu.endswith(pos_sfx.upper()):
                 base = nu[:-len(pos_sfx)]
                 neg_candidate = base + neg_sfx.upper()
-                if neg_candidate in net_names_upper:
+                neg_key = (prefix, neg_candidate)
+                if neg_key in net_names_upper:
                     pos_real = real_name
-                    neg_real = net_names_upper[neg_candidate]
+                    neg_real = net_names_upper[neg_key]
                     pair_key = (min(pos_real, neg_real), max(pos_real, neg_real))
                     if pair_key in found_pairs:
                         continue
@@ -5628,12 +5636,20 @@ def analyze_bus_topology(bus_elements: dict, labels: list[dict], nets: dict) -> 
     if aliases:
         alias_info = []
         all_label_names = set(l["name"] for l in labels)
+        # KH-359: net keys may be sheet-qualified (/<sheet>/<name>) with the
+        # bare name on display_name. Bus alias members are always bare
+        # label names, so match against keys ∪ display_names.
+        display_index = set(nets)
+        for _v in nets.values():
+            dn = _v.get("display_name")
+            if dn:
+                display_index.add(dn)
         for alias in aliases:
             members = alias["members"]
             present = [m for m in members if m in all_label_names]
             missing = [m for m in members if m not in all_label_names]
             # Check which member names resolve to actual nets
-            resolved = [m for m in members if m in nets]
+            resolved = [m for m in members if m in display_index]
             entry = {
                 "name": alias["name"],
                 "member_count": len(members),
@@ -5642,7 +5658,7 @@ def analyze_bus_topology(bus_elements: dict, labels: list[dict], nets: dict) -> 
             }
             if missing:
                 entry["missing_labels"] = missing
-            unresolved = [m for m in members if m not in nets]
+            unresolved = [m for m in members if m not in display_index]
             if unresolved:
                 entry["unresolved_members"] = unresolved
             alias_info.append(entry)
@@ -8814,10 +8830,12 @@ def build_hierarchy_context(target_path: str, root_path: str) -> tuple:
     cross_sheet_nets = {}
 
     for label_name in sorted(target_hier_label_names):
-        # Find which net this label ended up in
+        # Find which net this label ended up in. KH-359: on a bare-name
+        # collision the net may carry a sheet-qualified key with the bare
+        # label name on display_name instead.
         matching_net = None
-        for net_name in nets:
-            if net_name == label_name:
+        for net_name, net_info in nets.items():
+            if net_name == label_name or net_info.get("display_name") == label_name:
                 matching_net = net_name
                 break
         if matching_net is None:
