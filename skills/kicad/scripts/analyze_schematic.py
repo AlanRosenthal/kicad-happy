@@ -1321,7 +1321,8 @@ def extract_title_block(root: list) -> dict:
 
 def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                   power_symbols: list[dict], junctions: list[dict],
-                  no_connects: list[dict] | None = None) -> dict:
+                  no_connects: list[dict] | None = None,
+                  sheet_names: list[str] | None = None) -> dict:
     """Build a connectivity map using union-find on coordinates.
 
     Groups all electrically connected points into nets, then names them
@@ -1470,6 +1471,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         k = add_point(ps["x"], ps["y"], {
             "source": "power_symbol",
             "net_name": ps["net_name"],
+            "power_scope": ps.get("_power_scope", "global"),
         }, sheet)
         # Global power symbols connect across all sheets; local power symbols
         # only connect within the same sheet (isolated power domains).
@@ -1522,7 +1524,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         net_groups.setdefault(root_k, []).append(k)
 
     # Name the nets
-    nets = {}
+    staged = []
     net_id = 0
     for root_k, members in net_groups.items():
         # Collect all info for this net
@@ -1539,33 +1541,46 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             "label": 3,
             "directive_label": 4,
         }
-        best_name = None
-        best_priority = 999
 
         # Accumulate every global / hierarchical / local label attached to
         # this net (LB-001 reads this; also useful for report annotations).
         # Dedup by (name, label_type).
+        # best = (priority, tiebreak_sheet, seq, name, is_local, sheet)
+        # tiebreak_sheet is -1 for global-scope sources so, at equal priority,
+        # a global name beats a local one and a lower (parent) sheet beats a
+        # higher one — KiCad names a resolved net after the parent member
+        # label. seq preserves first-seen order at full ties.
+        best = None
+        seq = 0
         net_labels_seen: set[tuple[str, str]] = set()
         net_labels: list[dict] = []
-
-        for info in all_info:
-            if info["source"] == "power_symbol":
-                p = _NET_NAME_PRIORITY["power_symbol"]
-                if p < best_priority:
-                    best_name = info["net_name"]
-                    best_priority = p
-            elif info["source"] == "label":
-                lbl_name = info.get("name") or ""
-                lbl_type = info.get("label_type") or "label"
-                p = _NET_NAME_PRIORITY.get(lbl_type, 3)
-                if p < best_priority:
-                    best_name = lbl_name
-                    best_priority = p
-                key_tuple = (lbl_name, lbl_type)
-                if lbl_name and key_tuple not in net_labels_seen:
-                    net_labels_seen.add(key_tuple)
-                    net_labels.append({"name": lbl_name, "type": lbl_type})
-        net_name = best_name
+        for m in members:
+            m_sheet = m[0]
+            for info in point_info.get(m, []):
+                src = info["source"]
+                if src == "power_symbol":
+                    p = _NET_NAME_PRIORITY["power_symbol"]
+                    cand_name = info["net_name"]
+                    is_local = info.get("power_scope") == "local"
+                elif src == "label":
+                    lbl_name = info.get("name") or ""
+                    lbl_type = info.get("label_type") or "label"
+                    p = _NET_NAME_PRIORITY.get(lbl_type, 3)
+                    cand_name = lbl_name
+                    is_local = lbl_type in ("label", "directive_label")
+                    key_tuple = (lbl_name, lbl_type)
+                    if lbl_name and key_tuple not in net_labels_seen:
+                        net_labels_seen.add(key_tuple)
+                        net_labels.append({"name": lbl_name, "type": lbl_type})
+                else:
+                    continue
+                if cand_name:
+                    cand = (p, m_sheet if is_local else -1, seq,
+                            cand_name, is_local, m_sheet)
+                    if best is None or cand[:3] < best[:3]:
+                        best = cand
+                seq += 1
+        net_name = best[3] if best else None
 
         # Check if any member of this group is a no-connect marker OR a
         # library-defined NC pin (pin type "no_connect" in the symbol def).
@@ -1599,33 +1614,55 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         # Keep nets that have pin connections, OR named nets (from labels/power symbols)
         # even without pins — this supports legacy files where pin positions aren't available
         if pin_connections or not net_name.startswith("__unnamed_"):
-            if net_name in nets:
-                # Merge into existing net (can happen when a local label shares a
-                # name with a power symbol or global label on a disconnected wire
-                # network — e.g., a "GND" label on a connector that isn't wired
-                # to the main GND power symbol network).
-                nets[net_name]["pins"].extend(pin_connections)
-                nets[net_name]["point_count"] += len(members)
-                if has_nc_marker:
-                    nets[net_name]["no_connect"] = True
-                if has_pwr_flag:
-                    nets[net_name]["has_pwr_flag"] = True
-                existing_labels = nets[net_name].setdefault("labels", [])
-                existing_seen = {(lbl["name"], lbl["type"]) for lbl in existing_labels}
-                for nl in net_labels:
-                    if (nl["name"], nl["type"]) not in existing_seen:
-                        existing_labels.append(nl)
-                        existing_seen.add((nl["name"], nl["type"]))
-            else:
-                nets[net_name] = {
-                    "name": net_name,
-                    "pins": pin_connections,
-                    "point_count": len(members),
-                    "no_connect": has_nc_marker,
-                    "has_pwr_flag": has_pwr_flag,
-                    "labels": net_labels,
-                }
+            staged.append({
+                "bare": net_name,
+                "is_local": bool(best) and best[4],
+                "sheet": best[5] if best else 0,
+                "pins": pin_connections,
+                "point_count": len(members),
+                "no_connect": has_nc_marker,
+                "has_pwr_flag": has_pwr_flag,
+                "labels": net_labels,
+            })
 
+    # KH-359: one entry per union-find group. On bare-name collisions the
+    # global-scope group keeps the bare key; local groups get KiCad-style
+    # /<sheet>/<name> keys (sheet file stem, #N for repeated instance stems).
+    n_sheets = 1 + max((e["sheet"] for e in staged), default=0)
+    sheet_labels, _stem_counts = [], {}
+    for i in range(n_sheets):
+        stem = (sheet_names[i] if sheet_names and i < len(sheet_names)
+                else f"sheet{i}")
+        _stem_counts[stem] = _stem_counts.get(stem, 0) + 1
+        n = _stem_counts[stem]
+        sheet_labels.append(stem if n == 1 else f"{stem}#{n}")
+
+    by_bare: dict[str, list[dict]] = {}
+    for e in staged:
+        by_bare.setdefault(e["bare"], []).append(e)
+
+    nets = {}
+    for bare, entries in by_bare.items():
+        for e in entries:
+            if len(entries) == 1 or not e["is_local"]:
+                k = bare
+            else:
+                k = f"/{sheet_labels[e['sheet']]}/{bare}"
+            n = 2
+            while k in nets:
+                k = f"/{sheet_labels[e['sheet']]}/{bare}#{n}"
+                n += 1
+            entry = {
+                "name": k,
+                "pins": e["pins"],
+                "point_count": e["point_count"],
+                "no_connect": e["no_connect"],
+                "has_pwr_flag": e["has_pwr_flag"],
+                "labels": e["labels"],
+            }
+            if k != bare:
+                entry["display_name"] = bare
+            nets[k] = entry
     return nets
 
 
@@ -3170,7 +3207,8 @@ def parse_legacy_schematic(path: str, analysis_dir: str | Path | None = None) ->
 
     # Build nets from wires + labels + power symbols + component pins
     nets = build_net_map(all_components, all_wires, all_labels, power_symbols, all_junctions,
-                         all_no_connects)
+                         all_no_connects,
+                         sheet_names=[Path(p).stem for p in sheets_parsed])
 
     stats = compute_statistics(all_components, nets, bom, all_wires, all_no_connects)
 
@@ -8730,7 +8768,8 @@ def build_hierarchy_context(target_path: str, root_path: str) -> tuple:
     # Build unified net map for the full project
     nets = build_net_map(
         all_components, parsed["wires"], all_labels,
-        power_symbols, parsed["junctions"], parsed["no_connects"])
+        power_symbols, parsed["junctions"], parsed["no_connects"],
+        sheet_names=[Path(p).stem for p in sheets_parsed])
 
     # Identify which sheet index corresponds to the target file
     target_sheet_idx = None
@@ -9141,7 +9180,8 @@ def analyze_schematic(path: str, project_root: str | None = None,
 
     # Build net map across all sheets
     nets = build_net_map(all_components, all_wires, all_labels, power_symbols, all_junctions,
-                         all_no_connects)
+                         all_no_connects,
+                         sheet_names=[Path(p).stem for p in sheets_parsed])
 
     # Generate BOM
     bom = generate_bom(all_components)
