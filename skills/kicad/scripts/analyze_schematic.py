@@ -1424,7 +1424,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         return True
 
     def union_with_overlapping_wires(k, px, py, sheet=0):
-        """Union point k with any wire segment it lies on (same sheet only)."""
+        """Union point k with every wire segment it lies on (same sheet only)."""
         gx = int(px // _WIRE_GRID_SIZE)
         gy = int(py // _WIRE_GRID_SIZE)
         candidates = wire_grid.get((sheet, gx, gy), ())
@@ -1432,7 +1432,9 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             wk1, wk2, wx1, wy1, wx2, wy2, ws = wire_segments[idx]
             if point_on_segment(px, py, wx1, wy1, wx2, wy2):
                 union(k, wk1)
-                return  # one match is enough since wire endpoints are already unioned
+                # KH-360: no early return — a junction/label at a crossing
+                # must join every wire under it, matching KiCad's
+                # connection_graph (all coincident lines are inserted).
 
     # Add labels — in KiCad, labels can be placed anywhere on a wire,
     # not just at endpoints, so we must check for mid-wire placement.
