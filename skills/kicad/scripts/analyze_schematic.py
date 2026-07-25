@@ -4589,12 +4589,16 @@ def _detect_differential_pairs(ctx: AnalysisContext) -> list:
     # Net-name-based detection: find matching suffix pairs. Key by
     # (sheet_prefix, display_name.upper()) so a KH-359 sheet-qualified net
     # (e.g. /s1/USB_P, display_name "USB_P") still pairs by name, but two
-    # same-named nets on *different* sheets never cross-pair.
+    # same-named nets on *different* sheets never cross-pair. Plain
+    # assignment (not setdefault) preserves the pre-KH-359 comprehension's
+    # last-wins semantics on a case-insensitive collision: unqualified
+    # boards must resolve a collision identically to the old
+    # `{n.upper(): n for n in nets}` one-liner.
     net_names_upper: dict[tuple[str, str], str] = {}
     for k, v in nets.items():
         disp = v.get("display_name", k)
         prefix = k[: -len(disp)] if k.endswith(disp) else ""
-        net_names_upper.setdefault((prefix, disp.upper()), k)
+        net_names_upper[(prefix, disp.upper())] = k
     found_pairs: set[tuple[str, str]] = set()  # track to avoid duplicates
 
     for pos_sfx, neg_sfx in _diff_suffix_pairs:
