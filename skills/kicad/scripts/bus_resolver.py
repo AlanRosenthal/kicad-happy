@@ -180,9 +180,12 @@ class BusGraph:
     def cluster_ordered(self, cid, width):
         matches = [att["expansion"] for att in self._cluster_labels.get(cid, [])
                    if len(att["expansion"]) == width]
-        if len(matches) == 1:
+        # Ambiguity is two DIFFERENT expansions of the same width — the same
+        # bus labeled twice along one wire (readability) is not ambiguous.
+        distinct = {tuple(m) for m in matches}
+        if len(distinct) == 1:
             return list(matches[0])
-        if len(matches) > 1:
+        if len(distinct) > 1:
             self.note_unresolved(f"ambiguous_bus_width_{width}")
         return None
 
