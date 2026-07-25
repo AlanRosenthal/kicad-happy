@@ -97,7 +97,7 @@ class NetLabel:
     name: str = field(metadata={
         "description": "Label text."})
     type: str = field(metadata={
-        "description": "Label kind, e.g. 'local', 'global', 'hierarchical'."})
+        "description": "Label kind: 'label', 'global_label', 'hierarchical_label', or 'directive_label'."})
 
 
 @dataclass
