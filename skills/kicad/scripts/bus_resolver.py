@@ -178,8 +178,13 @@ class BusGraph:
         return self._cluster_members.get(cid)
 
     def cluster_ordered(self, cid, width):
+        # Only local bus labels define the cluster's own member naming. A
+        # pin/hier port carries the FAR-side name (the child's members, or the
+        # grandparent's), which maps positionally — never the local ordering —
+        # so it must not participate here, or a cluster labeled by both a local
+        # bus and a differently-named sheet pin would read as ambiguous.
         matches = [att["expansion"] for att in self._cluster_labels.get(cid, [])
-                   if len(att["expansion"]) == width]
+                   if att["role"] == "local" and len(att["expansion"]) == width]
         # Ambiguity is two DIFFERENT expansions of the same width — the same
         # bus labeled twice along one wire (readability) is not ambiguous.
         distinct = {tuple(m) for m in matches}
