@@ -191,3 +191,73 @@ class BusGraph:
 
     def note_unresolved(self, reason, name=None):
         self.unresolved.append({"reason": reason, "name": name})
+
+
+def match_ports(pin_ports, hier_ports, unresolved):
+    """Pair parent-side sheet-pin ports with child-side hier-label ports.
+
+    Indexes hier_ports by (ns, name) (iterating hier_ports in list order —
+    if two hier ports share a key the sheet is malformed: first one wins
+    the index slot and a note is appended to unresolved). For each pin port
+    in pin_ports (in list order) finds its counterpart by the same key and
+    pairs member slots positionally: parent = port["parent_ordered"] or
+    port["members"] (an anonymous parent cluster falls back to the pin's
+    own expansion — spec rule 3/5); child = hier port's "members". A width
+    mismatch appends a note to unresolved and contributes no pairs for that
+    port (no partial mapping). A missing counterpart in either direction
+    (a pin port with no hier port at that key, or vice versa) also appends
+    a note; the hier-side pass runs after the pin-side pass, iterating
+    hier_ports in list order. Returns
+    [((pin_sheet, pin_cluster, parent_member),
+      (hier_sheet, hier_cluster, child_member)), ...].
+
+    "parent_ordered" is not computed here — the caller (Task 10) computes
+    it via cluster_ordered(cluster, len(members)) on the parent graph and
+    stashes it on the port dict before calling this function.
+    """
+    hier_by_key = {}
+    for hier in hier_ports:
+        key = (hier["ns"], hier["name"])
+        if key in hier_by_key:
+            unresolved.append({
+                "reason": f"duplicate hier-label port for {hier['name']} (malformed)",
+                "name": hier["name"],
+            })
+            continue
+        hier_by_key[key] = hier
+
+    pin_keys = {(pin["ns"], pin["name"]) for pin in pin_ports}
+
+    pairs = []
+    for pin in pin_ports:
+        key = (pin["ns"], pin["name"])
+        hier = hier_by_key.get(key)
+        if hier is None:
+            unresolved.append({
+                "reason": f"no hier-label counterpart for sheet pin {pin['name']}",
+                "name": pin["name"],
+            })
+            continue
+        parent = pin["parent_ordered"] or pin["members"]
+        child = hier["members"]
+        if len(parent) != len(child):
+            unresolved.append({
+                "reason": f"bus width mismatch at sheet pin {pin['name']}",
+                "name": pin["name"],
+            })
+            continue
+        for i in range(len(parent)):
+            pairs.append((
+                (pin["sheet"], pin["cluster"], parent[i]),
+                (hier["sheet"], hier["cluster"], child[i]),
+            ))
+
+    for hier in hier_ports:
+        key = (hier["ns"], hier["name"])
+        if key not in pin_keys:
+            unresolved.append({
+                "reason": f"no sheet-pin counterpart for hier label {hier['name']}",
+                "name": hier["name"],
+            })
+
+    return pairs
