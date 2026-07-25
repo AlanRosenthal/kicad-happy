@@ -5855,6 +5855,13 @@ def analyze_bus_topology(bus_elements: dict, labels: list[dict], nets: dict) -> 
     result = {
         "bus_wire_count": len(bus_elements.get("bus_wires", [])),
         "bus_entry_count": len(bus_elements.get("bus_entries", [])),
+        # GH #25 honesty invariant (spec §4): bus constructs the resolver
+        # could not confidently resolve are surfaced, never silently dropped.
+        "unresolved": sorted(
+            ({"reason": u.get("reason", ""), "name": u.get("name")}
+             for u in bus_elements.get("_unresolved", [])),
+            key=lambda u: (u["reason"], u["name"] is None, u["name"] or ""),
+        ),
     }
 
     aliases = bus_elements.get("bus_aliases", [])

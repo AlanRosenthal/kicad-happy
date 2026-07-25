@@ -112,7 +112,7 @@ Output of `python3 skills/kicad/scripts/analyze_schematic.py <file>.kicad_sch`.
 | `connectivity_issues` | `dict` | yes | Connectivity issue lists: single_pin_nets, single_pin_net_findings, multi_driver_nets, unconnected_pins, power_net_summary. |
 | `annotation_issues` | `dict` | yes | Annotation issue bag: duplicate_references, unannotated, missing_value, zero_indexed_refs. |
 | `ground_domains` | `dict` | yes | Ground topology: ground_nets, multiple_domains, domains, optional star-ground note. |
-| `bus_topology` | `dict` | yes | Bus wire statistics: bus_wire_count, bus_entry_count. |
+| `bus_topology` | `BusTopology` | yes | Bus wire statistics: bus_wire_count, bus_entry_count, unresolved. May also carry aliases / detected_bus_signals (undeclared, shape varies). |
 | `wire_geometry` | `dict` | yes | Wire-geometry summary: total_wires, total_length_mm, avg_length_mm, optional diagonal/short-wire callouts. |
 | `simulation_readiness` | `dict` | yes | SPICE readiness rollup: total_components, likely_simulatable, needs_model, simulatable_percent, components_without_model. |
 | `hierarchical_labels` | `dict` | yes | Label counts: global_label_count, hierarchical_label_count, optional unconnected_hierarchical or conflict warnings. |

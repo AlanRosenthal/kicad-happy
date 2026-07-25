@@ -172,6 +172,29 @@ class PinCoverageWarning:
 
 
 @dataclass
+class BusUnresolved:
+    """One bus construct the resolver could not confidently resolve."""
+    reason: str = field(metadata={
+        "description": "Why this bus construct could not be resolved."})
+    name: Optional[str] = field(default=None, metadata={
+        "description": "Associated bus alias / label / sheet-pin name, "
+                       "when known; null otherwise."})
+
+
+@dataclass
+class BusTopology:
+    """Bus wire statistics and resolver honesty markers (GH #25)."""
+    bus_wire_count: int = field(metadata={
+        "description": "Count of bus wire segments."})
+    bus_entry_count: int = field(metadata={
+        "description": "Count of bus entry taps."})
+    unresolved: list[BusUnresolved] = field(metadata={
+        "description": "Bus constructs the resolver could not confidently "
+                       "resolve — connectivity through them is NOT asserted "
+                       "(honest-limitation marker, GH #25)."})
+
+
+@dataclass
 class SchematicEnvelope:
     """Top-level output of analyze_schematic.py.
 
@@ -267,8 +290,10 @@ class SchematicEnvelope:
     ground_domains: dict = field(metadata={
         "description": "Ground topology: ground_nets, multiple_domains, "
                        "domains, optional star-ground note."})
-    bus_topology: dict = field(metadata={
-        "description": "Bus wire statistics: bus_wire_count, bus_entry_count."})
+    bus_topology: BusTopology = field(metadata={
+        "description": "Bus wire statistics: bus_wire_count, bus_entry_count, "
+                       "unresolved. May also carry aliases / "
+                       "detected_bus_signals (undeclared, shape varies)."})
     wire_geometry: dict = field(metadata={
         "description": "Wire-geometry summary: total_wires, "
                        "total_length_mm, avg_length_mm, optional "
