@@ -104,7 +104,7 @@ Output of `python3 skills/kicad/scripts/analyze_schematic.py <file>.kicad_sch`.
 | `assessments` | `list[Assessment]` | yes | Informational assessments (empty for schematic at v1.4; reserved for future measurement-style records). |
 | `bom` | `list[BomEntry]` | yes | Deduplicated BOM rows. |
 | `components` | `list[dict]` | yes | Every non-power component as a dict. Shape is effectively open: reference/value/lib_id/footprint/datasheet/description/mpn/manufacturer/distributor SKUs/geometry/uuid/type/parsed_value plus internal bookkeeping (_sheet, pin_nets, pin_uuids). Tightens to a typed Component in v1.5. |
-| `nets` | `dict[str, NetEntry]` | yes | Net connectivity map keyed by net name. |
+| `nets` | `dict[str, NetEntry]` | yes | Net connectivity map keyed by unique net key — the display name, sheet-qualified as /<sheet>/<name> when distinct nets share a bare name. |
 | `subcircuits` | `list[dict]` | yes | Hierarchical sub-sheets: [{reference, path, sheet_name, sheet_file, instances}]. |
 | `ic_pin_analysis` | `list[dict]` | yes | Per-IC pin mappings. Each entry carries reference, value, type, lib_id, mpn, description, datasheet, function, total_pins, unconnected_pins, pins[], power_pins[], signal_pins[], decoupling_caps_by_rail. Covers type in {ic, connector, crystal, oscillator}; transistors live in transistor_pin_analysis[] (F4). |
 | `transistor_pin_analysis` | `list[dict]` | yes | Per-transistor pin mappings. Same shape as ic_pin_analysis entries but filtered to type=transistor (MOSFETs, BJTs, FETs). Lets bridge / half-bridge / gate-driver reviewers verify gate/source/drain wiring without reconstructing pin maps from nets[].pins[] by hand. F4. |

@@ -92,6 +92,15 @@ class NetPin:
 
 
 @dataclass
+class NetLabel:
+    """One label record attached to a net."""
+    name: str = field(metadata={
+        "description": "Label text."})
+    type: str = field(metadata={
+        "description": "Label kind, e.g. 'local', 'global', 'hierarchical'."})
+
+
+@dataclass
 class NetEntry:
     """Connectivity entry for one net."""
     name: str = field(metadata={
@@ -104,8 +113,12 @@ class NetEntry:
         "description": "Net terminated by a no-connect flag."})
     has_pwr_flag: bool = field(default=False, metadata={
         "description": "Net carries a PWR_FLAG ERC source declaration."})
-    labels: list[str] = field(default_factory=list, metadata={
-        "description": "Label strings attached to this net."})
+    labels: list[NetLabel] = field(default_factory=list, metadata={
+        "description": "Label records attached to this net."})
+    display_name: str | None = field(default=None, metadata={"description":
+        "Bare display name when the map key is disambiguated: sheet-qualified "
+        "local nets (/<sheet>/<name>, KH-359) and annotated __unnamed_ nets. "
+        "Absent when the key is already the display name."})
 
 
 @dataclass
@@ -217,7 +230,9 @@ class SchematicEnvelope:
                        "plus internal bookkeeping (_sheet, pin_nets, "
                        "pin_uuids). Tightens to a typed Component in v1.5."})
     nets: dict[str, NetEntry] = field(metadata={
-        "description": "Net connectivity map keyed by net name."})
+        "description": "Net connectivity map keyed by unique net key — the "
+                       "display name, sheet-qualified as /<sheet>/<name> "
+                       "when distinct nets share a bare name."})
     subcircuits: list[dict] = field(metadata={
         "description": "Hierarchical sub-sheets: "
                        "[{reference, path, sheet_name, sheet_file, instances}]."})
