@@ -54,6 +54,7 @@ from kicad_utils import (
     snap_to_mil_grid as _snap_mil,
 )
 from kicad_types import AnalysisContext
+from bus_resolver import BusGraph, expand_bus_name, match_ports
 from signal_detectors import (
     audit_power_pin_dc_paths,
     audit_rail_sources,
@@ -1254,11 +1255,9 @@ def extract_bus_elements(root: list) -> dict:
         pts = find_first(bus, "pts")
         if pts:
             xys = find_all(pts, "xy")
-            if len(xys) >= 2:
-                buses.append({
-                    "x1": float(xys[0][1]), "y1": float(xys[0][2]),
-                    "x2": float(xys[1][1]), "y2": float(xys[1][2]),
-                })
+            coords = [(float(p[1]), float(p[2])) for p in xys if len(p) > 2]
+            for (x1, y1), (x2, y2) in zip(coords, coords[1:]):
+                buses.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
 
     bus_entries = []
     for entry in find_all(root, "bus_entry"):
@@ -1322,11 +1321,19 @@ def extract_title_block(root: list) -> dict:
 def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                   power_symbols: list[dict], junctions: list[dict],
                   no_connects: list[dict] | None = None,
-                  sheet_names: list[str] | None = None) -> dict:
+                  sheet_names: list[str] | None = None,
+                  bus_elements: dict | None = None) -> dict:
     """Build a connectivity map using union-find on coordinates.
 
     Groups all electrically connected points into nets, then names them
     from labels and power symbols.
+
+    When ``bus_elements`` carries bus wires (GH #25), a per-sheet bus pass
+    resolves hierarchical bus connectivity: bus-name labels are consumed out
+    of the ordinary label handling, and their members are joined by name,
+    by bus entry, and — across sheet pins — positionally to the child sheet's
+    hier-label bus. On ``bus_elements=None`` or a board with no bus wires the
+    pass is inert and the output is byte-identical to the pre-#25 map.
     """
     EPSILON = COORD_EPSILON
 
@@ -1437,10 +1444,59 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                 # must join every wire under it, matching KiCad's
                 # connection_graph (all coincident lines are inserted).
 
+    # Bus pass classification (GH #25). Group bus wires/entries per sheet,
+    # build a BusGraph for every sheet that carries bus wire, and attach each
+    # bus-name label to its cluster. Consumed bus-name labels are removed from
+    # ordinary label handling (they create no coordinate point, no label_keys
+    # entry, no net_labels) — this drops the 0-pin bus-name phantoms and the
+    # bare-name parent↔child union, both of which the bus pass replaces.
+    bus_active = bool(bus_elements and bus_elements.get("bus_wires"))
+    bus_graphs: dict[int, BusGraph] = {}
+    bus_aliases: dict = {}
+    bus_label_idx: set[int] = set()
+    bus_named_labels: list[tuple] = []  # (sheet, bare, x, y) for local/hier labels
+    if bus_active:
+        bus_aliases = {a["name"]: a["members"]
+                       for a in bus_elements.get("bus_aliases", [])}
+        wires_by_sheet: dict[int, list] = {}
+        entries_by_sheet: dict[int, list] = {}
+        for bw in bus_elements.get("bus_wires", []):
+            wires_by_sheet.setdefault(bw.get("_sheet", 0), []).append(bw)
+        for be_ in bus_elements.get("bus_entries", []):
+            entries_by_sheet.setdefault(be_.get("_sheet", 0), []).append(be_)
+        for s in wires_by_sheet:
+            bus_graphs[s] = BusGraph(s, wires_by_sheet[s],
+                                     entries_by_sheet.get(s, []), bus_aliases)
+        for idx, lbl in enumerate(labels):
+            s = lbl.get("_sheet", 0)
+            g = bus_graphs.get(s)
+            if g is None:
+                continue
+            raw_name = lbl["name"]
+            if isinstance(raw_name, list):
+                raw_name = str(raw_name[0]) if raw_name else ""
+            bare = lbl.get("_bare_name", raw_name)
+            if expand_bus_name(bare, bus_aliases) is None:
+                continue
+            role = ("pin" if lbl.get("_is_sheet_pin")
+                    else ("hier" if lbl["type"] == "hierarchical_label"
+                          else "local"))
+            if g.add_bus_label(bare, lbl["x"], lbl["y"],
+                               ns=lbl.get("_hier_ns", ""), role=role):
+                bus_label_idx.add(idx)
+                if role in ("local", "hier"):
+                    bus_named_labels.append((s, bare, lbl["x"], lbl["y"]))
+            else:
+                g.note_unresolved("bus-name label not on a bus wire", bare)
+        for g in bus_graphs.values():
+            g.finalize()
+
     # Add labels — in KiCad, labels can be placed anywhere on a wire,
     # not just at endpoints, so we must check for mid-wire placement.
     label_keys: dict[str, list] = {}  # label_name -> list of coordinate keys
-    for lbl in labels:
+    for idx, lbl in enumerate(labels):
+        if idx in bus_label_idx:
+            continue
         sheet = lbl.get("_sheet", 0)
         # KH-078: Defensive coercion — malformed labels can have list names
         lbl_name = lbl["name"]
@@ -1516,6 +1572,95 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             sheet = nc.get("_sheet", 0)
             k = add_point(nc["x"], nc["y"], {"source": "no_connect"}, sheet)
             union_with_overlapping_wires(k, nc["x"], nc["y"], sheet)
+
+    # Bus pass unions (GH #25). A bus member is joined into the coordinate
+    # union-find through a synthetic slot key ("bus", sheet, cluster, member).
+    # Three mechanisms feed the same slot:
+    #   (A) by name — a wire labelled with a member name (Increment0) IS that
+    #       member, bus entry or not (KiCad names bus members after labels);
+    #   (B) by bus entry — an entry-tapped wire, resolved by intersecting the
+    #       tapped net's local labels with the cluster member set (covers
+    #       unlabelled tapped wires that (A) can't reach);
+    #   (C) across a sheet pin — the parent's pin-port members map positionally
+    #       onto the matching child hier-port members.
+    if bus_active and bus_graphs:
+        def bus_slot(sheet, cid, member):
+            sk = ("bus", sheet, cid, member)
+            if sk not in parent:
+                parent[sk] = sk
+            return sk
+
+        # (A) Name-based member joining for local/hier bus labels. Sheet-pin
+        # ("pin") labels are excluded: their members name the child's nets,
+        # not the parent's local nets, so they map only positionally in (C).
+        for s, bare, lx, ly in bus_named_labels:
+            g = bus_graphs[s]
+            cid = g.cluster_at(lx, ly)
+            expansion = expand_bus_name(bare, bus_aliases)
+            if not expansion:
+                continue
+            for member in expansion:
+                lk = label_keys.get((member, s)) or label_keys.get(member)
+                if lk:
+                    union(bus_slot(s, cid, member), lk[0])
+
+        # (B1) Register every bus-entry tap point and union it with the wires
+        # it lands on. This must precede the root_names sweep so a tapped
+        # wire's labels are visible on the tap's net.
+        tap_points = []  # (sheet, tap_key, tap)
+        for s in sorted(bus_graphs):
+            g = bus_graphs[s]
+            for tap in g.taps:
+                tk = add_point(tap["x"], tap["y"], {"source": "bus_tap"}, s)
+                union_with_overlapping_wires(tk, tap["x"], tap["y"], s)
+                tap_points.append((s, tk, tap))
+
+        # Local label names present on each union group, for tap member ID.
+        root_names: dict = {}
+        for pk, infos in point_info.items():
+            for i in infos:
+                if (i["source"] == "label"
+                        and (i.get("label_type") or "label")
+                        in ("label", "directive_label") and i.get("name")):
+                    root_names.setdefault(find(pk), set()).add(i["name"])
+
+        # (B2) Resolve each tap to its member slot(s) (after the root_names
+        # sweep). Normally the tapped wire carries exactly one member label.
+        # When several member wires of one bus are shorted together (e.g. all
+        # tied to GND), the tapped net carries every one of those labels — KiCad
+        # collapses those members to a single net, so we union the tap with each
+        # matched member slot (sorted for determinism). Only a tap whose net
+        # carries no member label is genuinely unresolved.
+        for s, tk, tap in tap_points:
+            g = bus_graphs[s]
+            names = root_names.get(find(tk), set())
+            mset = g.cluster_member_set(tap["cluster"])
+            cand = (names & mset) if mset is not None else set(names)
+            if cand:
+                for member in sorted(cand):
+                    union(tk, bus_slot(s, tap["cluster"], member))
+            else:
+                g.note_unresolved("unlabelled bus entry tap", None)
+
+        # (C) Positional sheet-pin port matching.
+        pin_ports, hier_ports = [], []
+        for s in sorted(bus_graphs):
+            g = bus_graphs[s]
+            for p in g.ports:
+                p = dict(p, sheet=s)
+                if p["role"] == "pin":
+                    p["parent_ordered"] = g.cluster_ordered(
+                        p["cluster"], len(p["members"]))
+                    pin_ports.append(p)
+                else:
+                    hier_ports.append(p)
+        all_unresolved: list = []
+        for (ps, pc, pm), (cs, cc, cm) in match_ports(
+                pin_ports, hier_ports, all_unresolved):
+            union(bus_slot(ps, pc, pm), bus_slot(cs, cc, cm))
+
+        bus_elements["_unresolved"] = all_unresolved + [
+            u for s in sorted(bus_graphs) for u in bus_graphs[s].unresolved]
 
     # Build net groups
     net_groups: dict[tuple, list[tuple]] = {}
@@ -1619,7 +1764,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                 "is_local": bool(best) and best[4],
                 "sheet": best[5] if best else 0,
                 "pins": pin_connections,
-                "point_count": len(members),
+                "point_count": len([m for m in members if m[0] != "bus"]),
                 "no_connect": has_nc_marker,
                 "has_pwr_flag": has_pwr_flag,
                 "labels": net_labels,
@@ -8690,21 +8835,28 @@ def parse_all_sheets(root_path: str, root_tree: list | None = None,
             j["_sheet"] = sheet_idx
         for nc in no_connects:
             nc["_sheet"] = sheet_idx
+        for be in bus_elements.get("bus_wires", []):
+            be["_sheet"] = sheet_idx
+        for be in bus_elements.get("bus_entries", []):
+            be["_sheet"] = sheet_idx
 
-        if inst_path:
-            for lbl in labels:
-                if lbl["type"] == "hierarchical_label":
-                    suuid = lbl.pop("_sheet_uuid", None)
-                    if suuid:
-                        lbl["name"] = inst_path + "/" + suuid + "/" + lbl["name"]
-                    else:
+        # Namespace hierarchical labels, but retain the bare identity and
+        # namespace on internal fields so the bus pass (GH #25) can pair
+        # parent sheet-pin ports with child hier-label ports positionally.
+        # Name-mangling must reproduce the pre-#25 values exactly.
+        for lbl in labels:
+            if lbl["type"] == "hierarchical_label":
+                suuid = lbl.pop("_sheet_uuid", None)
+                lbl["_bare_name"] = lbl["name"]
+                if suuid:
+                    lbl["_is_sheet_pin"] = True
+                    lbl["_hier_ns"] = ((inst_path + "/" + suuid)
+                                       if inst_path else ("/" + suuid))
+                    lbl["name"] = lbl["_hier_ns"] + "/" + lbl["name"]
+                else:
+                    lbl["_hier_ns"] = inst_path
+                    if inst_path:
                         lbl["name"] = inst_path + "/" + lbl["name"]
-        else:
-            for lbl in labels:
-                if lbl["type"] == "hierarchical_label":
-                    suuid = lbl.pop("_sheet_uuid", None)
-                    if suuid:
-                        lbl["name"] = "/" + suuid + "/" + lbl["name"]
 
         all_components.extend(components)
         all_wires.extend(wires)
@@ -8789,7 +8941,8 @@ def build_hierarchy_context(target_path: str, root_path: str) -> tuple:
     nets = build_net_map(
         all_components, parsed["wires"], all_labels,
         power_symbols, parsed["junctions"], parsed["no_connects"],
-        sheet_names=[Path(p).stem for p in sheets_parsed])
+        sheet_names=[Path(p).stem for p in sheets_parsed],
+        bus_elements=parsed["bus_elements"])
 
     # Identify which sheet index corresponds to the target file
     target_sheet_idx = None
@@ -9203,7 +9356,8 @@ def analyze_schematic(path: str, project_root: str | None = None,
     # Build net map across all sheets
     nets = build_net_map(all_components, all_wires, all_labels, power_symbols, all_junctions,
                          all_no_connects,
-                         sheet_names=[Path(p).stem for p in sheets_parsed])
+                         sheet_names=[Path(p).stem for p in sheets_parsed],
+                         bus_elements=merged_bus)
 
     # Generate BOM
     bom = generate_bom(all_components)
