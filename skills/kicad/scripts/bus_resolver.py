@@ -26,10 +26,19 @@ def expand_bus_name(name, aliases=None, _depth=0):
     m = _GROUP_RE.match(name)
     if m:
         prefix = m.group("prefix")
-        # _{...}/^{...}/~{...} is KiCad subscript/superscript/overline
-        # markup on a plain net name, not a bus group.
+        # _{...}/^{...}/~{...} is KiCad subscript/superscript/overline markup.
+        # On a plain net name it is not a bus (~{OE}, C_{Out}). But when the
+        # wrapped content is itself a bus, KiCad distributes the markup over
+        # each expanded member — the overline/subscript stays on every member:
+        #   ~{IPL[0..2]}      -> ~{IPL0} ~{IPL1} ~{IPL2}
+        #   SIMM_~{CAS[0..3]} -> SIMM_~{CAS0} SIMM_~{CAS1} ...
         if prefix.endswith(("_", "^", "~")):
-            return None
+            markup = prefix[-1]
+            base = prefix[:-1]
+            inner = expand_bus_name(m.group("members"), aliases, _depth + 1)
+            if inner is None:
+                return None
+            return [f"{base}{markup}{{{mem}}}" for mem in inner]
         members = []
         for tok in m.group("members").split():
             if aliases and tok in aliases:
@@ -178,20 +187,27 @@ class BusGraph:
         return self._cluster_members.get(cid)
 
     def cluster_ordered(self, cid, width):
-        # Only local bus labels define the cluster's own member naming. A
-        # pin/hier port carries the FAR-side name (the child's members, or the
-        # grandparent's), which maps positionally — never the local ordering —
-        # so it must not participate here, or a cluster labeled by both a local
-        # bus and a differently-named sheet pin would read as ambiguous.
-        matches = [att["expansion"] for att in self._cluster_labels.get(cid, [])
-                   if att["role"] == "local" and len(att["expansion"]) == width]
-        # Ambiguity is two DIFFERENT expansions of the same width — the same
-        # bus labeled twice along one wire (readability) is not ambiguous.
-        distinct = {tuple(m) for m in matches}
-        if len(distinct) == 1:
-            return list(matches[0])
-        if len(distinct) > 1:
-            self.note_unresolved(f"ambiguous_bus_width_{width}")
+        # The cluster's own member naming comes from a local bus label if it
+        # has one, else from a hierarchical bus label — both name the local
+        # wire, so a co-clustered sheet pin maps positionally to them. A sheet
+        # PIN never participates: it carries the FAR-side (child's) member
+        # names, which map positionally, not the local ordering. Local wins
+        # over hier so a local relabel (e.g. m68k's SIMM_~{CAS[0..3]} over a
+        # ~{CAS[0..3]} pin) still governs; hier is the fallback that lets a
+        # root/pass-through bus label (openmd's {PHASES} feeding OUT{PHASES}
+        # and V{PHASES} pins) canonicalize the cluster.
+        atts = self._cluster_labels.get(cid, [])
+        for role in ("local", "hier"):
+            matches = [att["expansion"] for att in atts
+                       if att["role"] == role and len(att["expansion"]) == width]
+            # Ambiguity is two DIFFERENT expansions of the same width — the same
+            # bus labeled twice along one wire (readability) is not ambiguous.
+            distinct = {tuple(m) for m in matches}
+            if len(distinct) == 1:
+                return list(matches[0])
+            if len(distinct) > 1:
+                self.note_unresolved(f"ambiguous_bus_width_{width}")
+                return None
         return None
 
     def note_unresolved(self, reason, name=None):

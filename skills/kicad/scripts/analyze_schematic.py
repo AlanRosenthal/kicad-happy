@@ -1509,8 +1509,21 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         }, sheet)
         # Only global labels and power symbols connect across sheets.
         # Local labels only connect within the same sheet (handled by wire union).
-        if lbl["type"] in ("global_label", "hierarchical_label"):
+        if lbl["type"] == "global_label":
             label_keys.setdefault(lbl_name, []).append(k)
+        elif lbl["type"] == "hierarchical_label":
+            # Cross-sheet by (namespaced) name — the pre-existing hier union.
+            label_keys.setdefault(lbl_name, []).append(k)
+            # AND same-name LOCAL labels on this sheet: KiCad joins a real
+            # hierarchical label to same-name local labels within its own sheet
+            # (openmd's root V_{ANA}, where a hier V_{ANA} and a local V_{ANA}
+            # name one net). Sheet PINS are excluded: a sheet pin's bare name is
+            # the child's, and several pins for different child instances share
+            # one bare name on one parent sheet — they must stay per-instance
+            # (mapped through the hierarchy), never merged by same-sheet name.
+            if not lbl.get("_is_sheet_pin"):
+                bare = lbl.get("_bare_name", lbl_name)
+                label_keys.setdefault((bare, sheet), []).append(k)
         else:
             # Local labels: union same-name labels within this sheet only
             local_key = (lbl_name, sheet)
@@ -1597,6 +1610,19 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         # local/hier bus member is local-scoped, so it must not fuse with a
         # coincidentally same-named GLOBAL label (keyed bare) elsewhere; KiCad
         # keeps local/hier bus scope separate from the global net space.
+        #
+        # Same-sheet bus-name joining (member_rep): a local or hierarchical
+        # bus label has sheet scope — KiCad connects same-name local/hier
+        # labels within a sheet. Two physically-separate bus clusters on one
+        # sheet that carry labels sharing a member name are therefore one net
+        # for that member (the member-level analogue of the ordinary same-name
+        # local-label union that the bus pass suppressed for bus labels). This
+        # is what chains a pass-through sheet's parent-side cluster to its
+        # child-side sheet-pin clusters (e.g. m68k's Memory routing D[0..31]
+        # down to Cache/SIMM/CDC). Sheet pins are excluded (not in
+        # bus_named_labels), so a pin without a co-located local label does not
+        # name-join — it connects only by wire and the positional match (C).
+        member_rep: dict[tuple, tuple] = {}  # (sheet, member) -> a member slot
         for s, bare, lx, ly in bus_named_labels:
             g = bus_graphs[s]
             cid = g.cluster_at(lx, ly)
@@ -1604,9 +1630,15 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             if not expansion:
                 continue
             for member in expansion:
+                slot = bus_slot(s, cid, member)
                 lk = label_keys.get((member, s))
                 if lk:
-                    union(bus_slot(s, cid, member), lk[0])
+                    union(slot, lk[0])
+                rep = member_rep.get((s, member))
+                if rep is None:
+                    member_rep[(s, member)] = slot
+                else:
+                    union(rep, slot)
 
         # (B1) Register every bus-entry tap point and union it with the wires
         # it lands on. This must precede the root_names sweep so a tapped
@@ -1658,6 +1690,33 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                     pin_ports.append(p)
                 else:
                     hier_ports.append(p)
+
+        # (C0) Co-clustered sheet pins are one physical bus. When a bus is
+        # routed straight from one sub-sheet symbol's pin to another's on a
+        # single cluster (no relabeling local label to canonicalize it), the
+        # two differently-named pins are the same wire, so bit i of each is one
+        # net. Join their member slots positionally, using the SAME effective
+        # ordering (C) uses — the cluster's local-label ordering if present,
+        # else the pin's own members — so this stays consistent with the
+        # pin↔hier mapping below. With a local label all pins already share
+        # that ordering, so this is a no-op there; it only bridges the
+        # no-local-label case (e.g. m68k's Bus sheet routing PEP_AD↔AD,
+        # ISA_D↔D, ATA_D↔D straight through to the peripheral sub-sheets).
+        pins_by_cluster: dict[tuple, list] = {}
+        for p in pin_ports:
+            pins_by_cluster.setdefault((p["sheet"], p["cluster"]), []).append(p)
+        for grp in pins_by_cluster.values():
+            if len(grp) < 2:
+                continue
+            ref = grp[0]["parent_ordered"] or grp[0]["members"]
+            for other in grp[1:]:
+                eff = other["parent_ordered"] or other["members"]
+                if len(eff) != len(ref):
+                    continue
+                for i in range(len(ref)):
+                    union(bus_slot(grp[0]["sheet"], grp[0]["cluster"], ref[i]),
+                          bus_slot(other["sheet"], other["cluster"], eff[i]))
+
         all_unresolved: list = []
         for (ps, pc, pm), (cs, cc, cm) in match_ports(
                 pin_ports, hier_ports, all_unresolved):
@@ -6205,7 +6264,8 @@ def check_instance_consistency(components: list[dict]) -> list[dict]:
     return warnings
 
 
-def validate_hierarchical_labels(labels: list[dict], nets: dict) -> dict:
+def validate_hierarchical_labels(labels: list[dict], nets: dict,
+                                 bus_elements: dict | None = None) -> dict:
     """Validate hierarchical label usage for cross-sheet connectivity.
 
     Checks for orphaned hierarchical labels (no matching sheet pin), hierarchical
@@ -6219,12 +6279,25 @@ def validate_hierarchical_labels(labels: list[dict], nets: dict) -> dict:
         "global_label_count": len(global_labels),
     }
 
-    # Check for hierarchical labels that don't appear in any net
+    # Bus-name hierarchical labels are consumed by the bus pass (expanded to
+    # members), so they legitimately never appear as a net under their own bus
+    # name — In[0..7], {PHASES}, etc. Excluding them keeps this validation from
+    # false-flagging every hierarchical bus as unconnected (GH #25).
+    aliases = {a["name"]: a["members"]
+               for a in (bus_elements or {}).get("bus_aliases", [])}
+
+    def _is_bus_label(l: dict) -> bool:
+        bare = l.get("_bare_name", l["name"])
+        return expand_bus_name(bare, aliases) is not None
+
+    # Check for hierarchical labels that don't appear in any net (bus labels
+    # excluded — they resolve to member nets, not a net under their bus name).
+    scalar_hier_names = set(l["name"] for l in hier_labels if not _is_bus_label(l))
     hier_names = set(l["name"] for l in hier_labels)
     global_names = set(l["name"] for l in global_labels)
     net_names = set(nets.keys())
 
-    unconnected_hier = sorted(hier_names - net_names)
+    unconnected_hier = sorted(scalar_hier_names - net_names)
     if unconnected_hier:
         result["unconnected_hierarchical"] = unconnected_hier
 
@@ -9444,7 +9517,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
     placement = spatial_clustering(all_components)
     pin_coverage = verify_pin_coverage(all_components, all_lib_symbols)
     instance_issues = check_instance_consistency(all_components)
-    hier_label_analysis = validate_hierarchical_labels(all_labels, nets)
+    hier_label_analysis = validate_hierarchical_labels(all_labels, nets, merged_bus)
     generic_sym_warnings = check_generic_transistor_symbols(all_components, str(path))
 
     # ---- Tier 3: High-level design analyses ----
