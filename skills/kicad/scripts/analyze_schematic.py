@@ -1593,6 +1593,10 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         # (A) Name-based member joining for local/hier bus labels. Sheet-pin
         # ("pin") labels are excluded: their members name the child's nets,
         # not the parent's local nets, so they map only positionally in (C).
+        # Only the same-sheet LOCAL key `(member, s)` is accepted — a
+        # local/hier bus member is local-scoped, so it must not fuse with a
+        # coincidentally same-named GLOBAL label (keyed bare) elsewhere; KiCad
+        # keeps local/hier bus scope separate from the global net space.
         for s, bare, lx, ly in bus_named_labels:
             g = bus_graphs[s]
             cid = g.cluster_at(lx, ly)
@@ -1600,7 +1604,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             if not expansion:
                 continue
             for member in expansion:
-                lk = label_keys.get((member, s)) or label_keys.get(member)
+                lk = label_keys.get((member, s))
                 if lk:
                     union(bus_slot(s, cid, member), lk[0])
 
@@ -1809,6 +1813,19 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                 entry["display_name"] = bare
             nets[k] = entry
     return nets
+
+
+# Internal-only fields the bus pass (GH #25) reads off namespaced hierarchical
+# labels. They must never reach the user-facing `labels` output. `_sheet` is
+# NOT one of these — it has leaked on every label since before this branch, so
+# stripping it would itself change baseline output.
+_INTERNAL_LABEL_KEYS = ("_bare_name", "_hier_ns", "_is_sheet_pin")
+
+
+def _labels_for_output(labels: list[dict]) -> list[dict]:
+    """Return a copy of `labels` with the bus-pass internal keys removed."""
+    return [{k: v for k, v in lbl.items() if k not in _INTERNAL_LABEL_KEYS}
+            for lbl in labels]
 
 
 def generate_bom(components: list[dict]) -> list[dict]:
@@ -3472,7 +3489,7 @@ def parse_legacy_schematic(path: str, analysis_dir: str | Path | None = None) ->
         "findings": findings,
         "assessments": [],
         "design_analysis": design_analysis,
-        "labels": all_labels,
+        "labels": _labels_for_output(all_labels),
         "no_connects": all_no_connects,
         "power_symbols": power_symbols,
         "annotation_issues": annotation_issues,
@@ -9601,7 +9618,7 @@ def analyze_schematic(path: str, project_root: str | None = None,
         "transistor_pin_analysis": transistor_analysis,
         "design_analysis": design_analysis,
         "connectivity_issues": connectivity_issues,
-        "labels": all_labels,
+        "labels": _labels_for_output(all_labels),
         "no_connects": all_no_connects,
         "power_symbols": power_symbols,
         "annotation_issues": annotation_issues,
