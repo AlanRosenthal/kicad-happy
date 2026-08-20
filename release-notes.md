@@ -2,6 +2,18 @@
 
 The story of each kicad-happy release — what changed and why it matters when upgrading. For line-level detail, see the [CHANGELOG](CHANGELOG.md).
 
+## 🧭 v2.2 — Hierarchical bus connectivity
+
+One theme: the schematic analyzer's view of connectivity now matches KiCad's. Bus groups (`D[0..7]`, `{SDA SCL}`, aliases) expand into member nets, bus entries and bus wires join the net graph, and hierarchical bus pins connect positionally per sheet instance — the phantom single-pin nets reported in #25 on bus-heavy hierarchical designs are gone (thanks Reid-n0rc for the clean report and repro). Where a bus connection genuinely can't be resolved, the analyzer now says so in a `bus_topology.unresolved` list instead of guessing.
+
+Two entangled identity fixes shipped with it: same-name local labels on different sheets no longer merge into one net (bare-name collisions get KiCad-style `/<sheet>/<name>` keys, and every net carries a `display_name`), and wire union joins every overlapping wire instead of stopping at the first.
+
+Validation went a level deeper than previous releases: alongside the full-corpus regression gate, the connectivity work was checked against `kicad-cli`'s own netlist export as ground truth on five golden boards — from an 80-net incrementer to a 1,220-net m68k homebrew computer. This is the first brick of the correctness-floor direction: where KiCad has an authoritative answer, the analyzer must agree with it.
+
+One behavior note when upgrading: bare net-name suppression patterns now also match the tails of hierarchical net keys (both `/uuid/Name` and the new `/<sheet>/<name>` shapes). If you suppress by bare net name on a multi-sheet project, review those patterns.
+
+Also in this release: findings no longer over-claim datasheet provenance — thermal package-table estimates and lifecycle API lookups are labeled for what they are (thanks fl4p for a model bug report, verified end-to-end); the plugin installs on Google Antigravity now that the Gemini CLI is deprecated (thanks ademuri); OSHWA certification-readiness docs (thanks Daniel Gleason); and the dangling symlink that broke GitHub Action downloads for v2 consumers is fixed (thanks orthdron for the precise diagnosis and fork test).
+
 ## 🔧 v2.1 — Correctness batch
 
 Seventeen analyzer fixes, no new subsystems. This release is what the field asked for: three GitHub reports (#24 inner-plane connectivity, #28/#29 via-in-pad and courtyard false positives), two external review rounds of a real ESP32-S3 board, and a fork sweep that turned up three never-submitted fixes by Anya Sabo (ported with authorship preserved — thank you).

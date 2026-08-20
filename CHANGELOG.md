@@ -6,6 +6,39 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
+## v2.2.0 — 2026-08-20
+
+**Theme: schematic connectivity correctness — hierarchical bus resolution, net identity, and provenance honesty. "Brick one" of the correctness-floor direction: analyzer connectivity is validated against KiCad's own netlist export as ground truth.**
+
+### Added
+
+- **#25** — Hierarchical bus connectivity: bus definitions (`D[0..7]`, `{...}` groups, bus aliases) expand into member nets, bus wires and bus entries join the net graph, and hierarchical bus pins connect positionally per sheet instance. New `skills/kicad/scripts/bus_resolver.py` (`expand_bus_name` / `BusGraph` / `match_ports`) bridged into `build_net_map`. Kills the phantom single-pin nets on bus-heavy hierarchical designs. (Reported by Reid-n0rc.)
+- Unresolvable bus connections are surfaced honestly in a new `bus_topology.unresolved` list instead of silently guessed.
+- Hierarchical and local labels with the same name on the same sheet now join (KiCad-verified behavior; also applies on non-bus boards).
+- Antigravity plugin support: root `plugin.json` manifest + `agy plugin install` docs, replacing the deprecated Gemini CLI path. (Contributed by ademuri.)
+- OSHWA certification-readiness guidance in the kicad skill. (Contributed by Daniel Gleason.)
+
+### Fixed
+
+- **KH-359** — Same-name local labels on different sheets no longer merge into one net entry. On bare-name collisions the global net keeps the bare key and locals get KiCad-style `/<sheet>/<name>` keys; every net entry now carries a `display_name`.
+- **KH-360** — Wire union joins every overlapping wire instead of stopping at the first (order-dependent disconnections at mid-segment junction taps).
+- Findings no longer claim datasheet provenance they don't have: thermal TH-DET / TS-001/002/003/005 package-table estimates and lifecycle LC-005/LC-006 API-derived findings now carry `heuristic_rule` / `api_lookup`; LT-001 upgrades genuine extraction-cache data to `datasheet`. `trust_summary.by_evidence_source` shifts accordingly. (Contributed by fl4p.)
+- **#38** — Removed the dangling `.agents/skills/kidoc` symlink that broke GitHub Action downloads for all v2 consumers; added the missing `datasheets` symlink. (Reported by orthdron; fix landed via #36.)
+- DigiKey FastAdd doc example no longer suggests `&newcart=true`, which silently empties the current cart. (Contributed by fl4p.)
+
+### Changed
+
+- **Suppression matching widened:** bare net-name suppression patterns now also match the tails of hierarchical `/uuid/Name` keys AND the new `/<sheet>/<name>` qualified keys. Existing suppression configs may match more nets than before — review bare net-name patterns on multi-sheet projects.
+- Envelope additions (all additive): `NetEntry.display_name`, typed `NetLabel`, `BusTopology.unresolved`.
+
+### Validation
+
+- kicad-cli netlist oracle (ground truth): strict pass on 5 golden boards — 80 / 221 / 1,220 / 486 / 70 nets, including an m68k homebrew computer and a KiCad-6-era design.
+- Full budgeted corpus regression gate CLEAN over the entire v2.1.0 → v2.2.0 range (170,014 units); bus-free boards byte-identical by invariant.
+- Contract suite: 706 passed / 8 skipped / 4 xfailed.
+
+---
+
 ## v2.1.0 — 2026-07-17
 
 **Theme: correctness batch — 17 analyzer fixes from field reports, external reviews, and a fork sweep.**
