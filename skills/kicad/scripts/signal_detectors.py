@@ -569,7 +569,7 @@ def detect_rc_filters(ctx: AnalysisContext, voltage_dividers: list[dict],
                 for cref in net_to_caps.get(rn, ()):
                     candidate_caps.add(cref)
 
-        for cap_ref in candidate_caps:
+        for cap_ref in sorted(candidate_caps):
             if cap_ref in crystal_refs:
                 continue  # KH-107: Skip crystal circuit components
             if cap_ref in opamp_exclude_refs:
@@ -924,7 +924,7 @@ def detect_crystal_circuits(ctx: AnalysisContext) -> list[dict]:
                 xtal_nets.add(net_name)
 
         load_caps = []
-        for net_name in xtal_nets:
+        for net_name in sorted(xtal_nets):
             if net_name not in ctx.nets:
                 continue
             for p in ctx.nets[net_name]["pins"]:
@@ -2661,7 +2661,7 @@ def detect_opamp_circuits(ctx: AnalysisContext) -> list[dict]:
 
             # 2-hop feedback
             if not rf_ref:
-                for out_comp_ref in out_comps:
+                for out_comp_ref in sorted(out_comps):
                     oc = ctx.comp_lookup.get(out_comp_ref)
                     if not oc or oc["type"] not in ("resistor", "capacitor"):
                         continue
@@ -2980,13 +2980,14 @@ def detect_bridge_circuits(ctx: AnalysisContext) -> tuple[list[dict], set, dict]
                                 break
 
         _bridge_refs = [hb["high_side"] for hb in half_bridges] + [hb["low_side"] for hb in half_bridges]
-        _bridge_driver_ref = next(iter(driver_ics), None)
+        _driver_ics = sorted(driver_ics)
+        _bridge_driver_ref = _driver_ics[0] if _driver_ics else None
         _bridge_summary_ref = _bridge_driver_ref or (_bridge_refs[0] if _bridge_refs else "")
         bridge_circuits.append({
             "topology": topology,
             "half_bridges": half_bridges,
-            "driver_ics": list(driver_ics),
-            "driver_values": {ref: ctx.comp_lookup[ref]["value"] for ref in driver_ics if ref in ctx.comp_lookup},
+            "driver_ics": _driver_ics,
+            "driver_values": {ref: ctx.comp_lookup[ref]["value"] for ref in _driver_ics if ref in ctx.comp_lookup},
             "fet_values": {hb["high_side"]: fet_pins[hb["high_side"]]["value"] for hb in half_bridges},
             "detector": "detect_bridge_circuits",
             "rule_id": "BR-DET",
@@ -2996,7 +2997,7 @@ def detect_bridge_circuits(ctx: AnalysisContext) -> tuple[list[dict], set, dict]
             "evidence_source": "topology",
             "summary": f"Bridge/gate driver {_bridge_summary_ref}",
             "description": f"{topology} bridge circuit detected",
-            "components": _bridge_refs + list(driver_ics),
+            "components": _bridge_refs + _driver_ics,
             "nets": [],
             "pins": [],
             "recommendation": "",

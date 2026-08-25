@@ -7544,7 +7544,7 @@ def analyze_protocol_compliance(components: list[dict], nets: dict,
 
     if not findings:
         return {}
-    return {"protocols_checked": list({f["protocol"] for f in findings}), "findings": findings,
+    return {"protocols_checked": sorted({f["protocol"] for f in findings}), "findings": findings,
             "total_issues": sum(len(f.get("issues", []) or []) for f in findings)}
 
 
