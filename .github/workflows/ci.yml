@@ -112,3 +112,24 @@ jobs:
         run: |
           cd /tmp/harness
           python -m pytest tests/contract/ -v
+
+      - name: Determinism guard (run twice, unpinned hash seed, diff minus inputs/capability_mode_ref)
+        run: |
+          cd "$KICAD_HAPPY_DIR"
+          SCH=/tmp/harness/tests/fixtures/simple-project/simple.kicad_sch
+          PCB=/tmp/harness/tests/fixtures/simple-project/simple.kicad_pcb
+          mkdir -p /tmp/det-guard/sch /tmp/det-guard/pcb
+
+          for i in 1 2; do
+            python3 skills/kicad/scripts/analyze_schematic.py "$SCH" --output /tmp/det-guard/sch/run_$i.json
+            python3 -c "import json; d=json.load(open('/tmp/det-guard/sch/run_$i.json')); d.pop('inputs', None); d.pop('capability_mode_ref', None); json.dump(d, open('/tmp/det-guard/sch/run_$i.norm.json','w'), sort_keys=True)"
+          done
+          cmp /tmp/det-guard/sch/run_1.norm.json /tmp/det-guard/sch/run_2.norm.json
+
+          for i in 1 2; do
+            python3 skills/kicad/scripts/analyze_pcb.py "$PCB" --full --output /tmp/det-guard/pcb/run_$i.json
+            python3 -c "import json; d=json.load(open('/tmp/det-guard/pcb/run_$i.json')); d.pop('inputs', None); d.pop('capability_mode_ref', None); json.dump(d, open('/tmp/det-guard/pcb/run_$i.norm.json','w'), sort_keys=True)"
+          done
+          cmp /tmp/det-guard/pcb/run_1.norm.json /tmp/det-guard/pcb/run_2.norm.json
+        env:
+          KICAD_HAPPY_DIR: ${{ github.workspace }}
