@@ -409,7 +409,7 @@ def check_cross_validation(schematic: dict, pcb: dict | None) -> list[dict]:
     # XV-002: Value consistency
     pcb_fp_map = {fp.get('reference', ''): fp for fp in pcb.get('footprints', [])}
     sch_comp_map = {c.get('reference', ''): c for c in schematic.get('components', [])}
-    for ref in sch_refs & pcb_refs:
+    for ref in sorted(sch_refs & pcb_refs):
         sch_val = sch_comp_map.get(ref, {}).get('value', '')
         pcb_fp = pcb_fp_map.get(ref, {})
         pcb_val = pcb_fp.get('value', '')
