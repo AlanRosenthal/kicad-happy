@@ -3473,14 +3473,14 @@ def detect_design_observations(ctx: AnalysisContext, results: dict) -> list[dict
         ref = ic["reference"]
         ic_power_nets = {net for net, _ in ctx.ref_pins.get(ref, {}).values()
                          if net and ctx.is_power_net(net) and not ctx.is_ground(net)}
-        undecoupled = [r for r in ic_power_nets if r not in decoupled_rails]
+        undecoupled = sorted([r for r in ic_power_nets if r not in decoupled_rails])
         if undecoupled:
             design_observations.append({
                 "category": "decoupling",
                 "component": ref,
                 "value": ic["value"],
                 "rails_without_caps": undecoupled,
-                "rails_with_caps": [r for r in ic_power_nets if r in decoupled_rails],
+                "rails_with_caps": sorted([r for r in ic_power_nets if r in decoupled_rails]),
                 "detector": "detect_design_observations",
                 "rule_id": "DO-DET",
                 "severity": "info",
