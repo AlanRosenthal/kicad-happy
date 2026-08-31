@@ -309,6 +309,7 @@ Output of `python3 skills/kicad/scripts/cross_analysis.py --schematic ... --pcb 
 | `summary` | `CrossAnalysisSummary` | yes | Roll-up summary (total + by_severity). |
 | `findings` | `list[Finding]` | yes | All cross-domain findings. |
 | `assessments` | `list[Assessment]` | yes | Informational assessments (empty for cross-analysis at v1.4). |
+| `checks_run` | `list[CheckRun]` | yes | Manifest of which cross-analysis checks executed this run, in call order (KH-381). Distinguishes 'ran and found nothing' from 'skipped for lack of required input' — see CheckRun. |
 | `trust_summary` | `TrustSummary` | yes | Trust posture rollup (confidence + evidence source). |
 | `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
 | `audience_summary` | `dict \| null` | no | Designer/reviewer/manager summary views. Added by apply_output_filters whenever findings[] is non-empty. |
