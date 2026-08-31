@@ -427,8 +427,15 @@ def snap_to_e_series(value: float, series: str = "E96") -> tuple:
 
 def classify_component(ref: str, lib_id: str, value: str, is_power: bool = False,
                        footprint: str = "", in_bom: bool = False,
-                       description: str = "") -> str:
-    """Classify component type from reference designator and library."""
+                       description: str = "", pins: list | None = None) -> str:
+    """Classify component type from reference designator and library.
+
+    pins: optional list of pin dicts (as produced by extract_lib_symbols,
+    each with a "name" key) for the KH-370 oscillator corroboration check.
+    None means pin data wasn't available to the caller (e.g. legacy .sch
+    parsing) — corroboration is skipped and prior (permissive) behavior
+    is preserved.
+    """
     # Power symbols: trust the lib_symbol (power) flag unconditionally.
     # KH-080: Components in the power: library WITHOUT the (power) flag
     # (e.g., DD4012SA buck converter) are real parts, not power symbols —
@@ -530,7 +537,20 @@ def classify_component(ref: str, lib_id: str, value: str, is_power: bool = False
             if any(x in _desc_low for x in ("oscillator", "clock oscillator",
                                               "mems oscillator", "tcxo", "vcxo", "ocxo")):
                 if "crystal" not in _desc_low:
-                    return "oscillator"
+                    # KH-370: bare "oscillator" substring over-fires on bus
+                    # peripherals (ADC/MCU/sensor ICs) whose datasheet
+                    # description merely mentions a built-in reference/timing
+                    # oscillator. Exclude that phrasing, then require pin
+                    # evidence of an actual clock-output part.
+                    _osc_internal_phrases = ("internal oscillator", "on-chip oscillator",
+                                              "internal reference", "with oscillator")
+                    if not any(x in _desc_low for x in _osc_internal_phrases):
+                        _clock_pin_names = {"OUT", "OUTPUT", "CLK", "CLKOUT", "XOUT", "FOUT"}
+                        _has_clock_pin = pins is not None and any(
+                            (p.get("name") or "").strip().upper() in _clock_pin_names
+                            for p in pins)
+                        if pins is None or _has_clock_pin or len(pins) <= 4:
+                            return "oscillator"
         if result == "varistor":
             if ("r_pot" in lib_low or "pot" in lib_low or "potentiometer" in lib_low
                     or "potentiometer" in val_low):

@@ -629,7 +629,7 @@ def extract_components(root: list, lib_symbols: dict, instance_uuid: str = "",
         sym_def = (lib_symbols.get(lib_name) if lib_name else None) or lib_symbols.get(lib_id, {})
         is_power_sym = sym_def.get("is_power", False)
         comp["type"] = classify_component(ref, lib_id, value, is_power_sym, footprint, in_bom=in_bom,
-                                          description=description)
+                                          description=description, pins=sym_def.get("pins"))
         # Store ki_keywords for downstream analysis (e.g., P-channel detection)
         comp["keywords"] = sym_def.get("keywords", "")
         # Track power scope (global vs local) for connectivity

@@ -1070,13 +1070,11 @@ def detect_crystal_circuits(ctx: AnalysisContext) -> list[dict]:
                 out_net = net_name
             elif ctx.is_power_net(net_name) and not ctx.is_ground(net_name):
                 vcc_net = net_name
-        # If no named output pin, check for non-power non-ground pins
-        if not out_net:
-            for pin in comp.get("pins", []):
-                net_name, _ = ctx.pin_net.get((ref, pin["number"]), (None, None))
-                if net_name and not ctx.is_power_net(net_name) and not ctx.is_ground(net_name):
-                    out_net = net_name
-                    break
+        # KH-370: do NOT fall back to the first non-power/non-ground pin as
+        # output_net — on a misclassified bus peripheral that net is a data
+        # line (e.g. I2C SCL), not a clock output. Leave out_net unset when
+        # no clock-out-named pin is present; CD-DET phase 2 already skips
+        # entries with no output_net.
 
         _osc_freq = _parse_crystal_frequency(comp.get("value", ""))
         _osc_freq_str = f" at {_osc_freq}Hz" if _osc_freq else ""
