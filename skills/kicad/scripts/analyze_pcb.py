@@ -1827,7 +1827,7 @@ def analyze_pad_to_pad_distances(footprints, tracks, vias, net_names):
 def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
                                     signal_nets=None, ref_layer_map=None,
                                     footprints=None, radius_mm=0.5,
-                                    debug_samples=None):
+                                    debug_samples=None, vias=None):
     """Check ground/power plane continuity under signal traces.
 
     For each signal net's trace segments, samples points along the trace
@@ -1850,6 +1850,11 @@ def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
         radius_mm: Radius (mm) for copper-presence search (default 0.5)
         debug_samples: If a list is passed, per-sample dicts are appended
             with keys {net, x, y, layer, hit} for GP-001 diagnostics.
+        vias: Optional via dict from extract_vias(). When given, a sample
+            that misses copper on the opposite layer is still credited as
+            a hit if it falls inside a via's own antipad — that void is
+            expected (KiCad clears copper around a via for isolation), not
+            a reference-plane gap (KH-392).
 
     Returns:
         List of gap findings: [{net, layer, gap_start_mm, gap_length_mm, ...}]
@@ -1881,6 +1886,32 @@ def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
 
     SAMPLE_INTERVAL = 2.0  # mm between sample points
 
+    # Pre-index vias into a coarse grid, once, before the net loop: a via's
+    # own antipad on the opposite copper layer is an expected void, not a
+    # reference-plane gap (KH-392). Grid pattern mirrors the proximity grid
+    # in analyze_trace_proximity() to keep the per-sample check O(1) instead
+    # of O(via_count).
+    ANTIPAD_CLEARANCE = 0.2  # mm — conservative upper bound for default zone clearance
+    ANTIPAD_GRID = 2.0  # mm
+    zone_clearances = [z.get("clearance") for z in zones if z.get("clearance")]
+    antipad_clearance = max([ANTIPAD_CLEARANCE] + zone_clearances)
+    via_grid: dict[tuple[int, int], list[tuple[float, float, float]]] = {}
+    for v in (vias or {}).get("vias", []):
+        vr = v.get("size", 0) / 2.0
+        if vr <= 0:
+            continue
+        gx, gy = int(v["x"] / ANTIPAD_GRID), int(v["y"] / ANTIPAD_GRID)
+        via_grid.setdefault((gx, gy), []).append((v["x"], v["y"], vr))
+
+    def _in_via_antipad(px: float, py: float) -> bool:
+        gx, gy = int(px / ANTIPAD_GRID), int(py / ANTIPAD_GRID)
+        for dgx in (-1, 0, 1):
+            for dgy in (-1, 0, 1):
+                for vx, vy, vr in via_grid.get((gx + dgx, gy + dgy), ()):
+                    if (px - vx) ** 2 + (py - vy) ** 2 <= (vr + antipad_clearance) ** 2:
+                        return True
+        return False
+
     for net_id, segs in net_segments.items():
         net_name = net_names.get(net_id, f"net_{net_id}")
         total_samples = 0
@@ -1911,14 +1942,21 @@ def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
                 # Check for ANY copper (zone, track, pad) on opposite layer
                 hit = cp.has_coverage_near(px, py, opp_layer,
                                            radius_mm=radius_mm)
+                antipad_credit = False
+                if not hit and _in_via_antipad(px, py):
+                    hit = True  # expected void — via's own antipad (KH-392)
+                    antipad_credit = True
                 if not hit:
                     gap_samples += 1
                 if debug_samples is not None:
-                    debug_samples.append({
+                    sample = {
                         'net': net_name, 'x': round(px, 2),
                         'y': round(py, 2), 'layer': opp_layer,
                         'hit': hit,
-                    })
+                    }
+                    if antipad_credit:
+                        sample['antipad_credit'] = True
+                    debug_samples.append(sample)
 
         if total_samples > 0 and gap_samples > 0:
             coverage_pct = round((1 - gap_samples / total_samples) * 100, 1)
@@ -6438,7 +6476,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
             ref_layer_map=ref_layer_map,
             footprints=footprints,
             radius_mm=return_path_radius_mm,
-            debug_samples=gp001_samples)
+            debug_samples=gp001_samples,
+            vias=vias)
 
     # Compact footprint output — include pad-to-net mapping but omit pad geometry
     footprint_summary = []
