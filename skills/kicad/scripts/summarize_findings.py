@@ -226,8 +226,8 @@ def _print_table(rows: list[dict], top: int | None) -> None:
         return
     print(f"# {len(rows)} rule groups across "
           f"{sum(r['count'] for r in rows)} findings")
-    print(f"{'rule_id':<18} {'severity':<9} {'count':>5}  {'det':>4} {'heu':>4} {'ds':>3} {'dr':>4}  example")
-    print("-" * 100)
+    print(f"{'rule_id':<21} {'severity':<9} {'count':>5}  {'det':>4} {'heu':>4} {'ds':>3} {'dr':>4}  example")
+    print("-" * 105)
     shown = rows[:top] if top else rows
     for r in shown:
         bc = r.get("by_confidence", {})
@@ -239,7 +239,7 @@ def _print_table(rows: list[dict], top: int | None) -> None:
         if "deep_review.json" in r.get("sources", []):
             rule_id = f"dr:{rule_id}"
         ex = r["examples"][0][:50] if r["examples"] else ""
-        print(f"{rule_id:<18} {r['severity']:<9} {r['count']:>5}  {det:>4} {heu:>4} {ds:>3} {dr:>4}  {ex}")
+        print(f"{rule_id:<21} {r['severity']:<9} {r['count']:>5}  {det:>4} {heu:>4} {ds:>3} {dr:>4}  {ex}")
     if top and len(rows) > top:
         print(f"# …({len(rows) - top} more groups omitted — use --top 0 to show all)")
 
