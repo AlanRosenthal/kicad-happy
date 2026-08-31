@@ -4870,8 +4870,9 @@ def analyze_design_rule_compliance(
         skipped_sorted = sorted(conditional_rules_skipped)
         result['conditional_rules_skipped'] = skipped_sorted
         result['conditional_rules_skipped_count'] = len(skipped_sorted)
+        rule_word = "rule" if len(skipped_sorted) == 1 else "rules"
         result['conditional_rules_note'] = (
-            f"{len(skipped_sorted)} conditional rules not evaluated "
+            f"{len(skipped_sorted)} conditional {rule_word} not evaluated "
             f"(condition support: none) — not applied board-wide")
 
     return result

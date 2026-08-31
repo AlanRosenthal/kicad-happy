@@ -55,6 +55,6 @@ if [ -z "$PCB" ] && [ -n "$SCHEMATIC" ]; then
         PCB="$PRO_STEM.kicad_pcb"
     else
         PCB_DIR=$(dirname "$SCHEMATIC")
-        PCB=$(find "$PCB_DIR" -maxdepth 1 -name "*.kicad_pcb" 2>/dev/null | head -1 || true)
+        PCB=$(find "$PCB_DIR" -maxdepth 1 -name "*.kicad_pcb" -not -path "*/node_modules/*" 2>/dev/null | sort | head -1 || true)
     fi
 fi

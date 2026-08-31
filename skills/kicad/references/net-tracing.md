@@ -136,8 +136,8 @@ separate from the point-to-point tracing above.
   connections are not asserted. `reason` is one of a fixed snake_case
   vocabulary (`name` carries the associated label/alias/sheet-pin name, or
   for `ambiguous_bus_width` the ambiguous width as a string; identical
-  `{reason, name}` pairs are deduped, so a note appears once even if the
-  underlying condition is hit by multiple co-clustered sheet pins):
+  `{reason, name}` pairs are deduplicated within the bus-graph resolution
+  notes; port-matching notes may repeat for genuinely distinct occurrences):
   - `entry_both_ends_on_bus` — a bus-entry tap lands on a bus wire at
     both ends (neither end is the wire side).
   - `entry_off_bus` — a bus-entry tap touches no bus wire at either end.
