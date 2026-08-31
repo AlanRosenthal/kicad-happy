@@ -14,17 +14,9 @@ OUTDIR=$(mktemp -d)
 SCHEMATIC="${INPUT_SCHEMATIC:-}"
 PCB="${INPUT_PCB:-}"
 
-if [ -z "$SCHEMATIC" ]; then
-    # Find all .kicad_sch files, prefer root-level, then pick the largest
-    SCHEMATIC=$(find . -name "*.kicad_sch" -not -path "./.git/*" -not -path "*/backup/*" \
-        -not -path "*/backups/*" -not -name "_autosave-*" 2>/dev/null \
-        | head -1 || true)
-fi
-
-if [ -z "$PCB" ] && [ -n "$SCHEMATIC" ]; then
-    PCB_DIR=$(dirname "$SCHEMATIC")
-    PCB=$(find "$PCB_DIR" -maxdepth 1 -name "*.kicad_pcb" 2>/dev/null | head -1 || true)
-fi
+# Deterministic project detection: exactly one project auto-selects,
+# otherwise fail loudly listing candidates (KH-369). See detect_project.sh.
+. "$ACTION_PATH/action/detect_project.sh"
 
 echo "::group::File Detection"
 echo "Schematic: ${SCHEMATIC:-not found}"
