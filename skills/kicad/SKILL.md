@@ -187,7 +187,7 @@ See `references/schematic-analysis.md` Step 2 for the full verification checklis
 ```bash
 python3 <skill-path>/scripts/analyze_pcb.py <file.kicad_pcb> --analysis-dir analysis/
 python3 <skill-path>/scripts/analyze_pcb.py <file.kicad_pcb> --analysis-dir analysis/ --proximity  # add crosstalk analysis
-python3 <skill-path>/scripts/analyze_pcb.py <file.kicad_pcb> --output pcb.json  # one-off, no cache
+python3 <skill-path>/scripts/analyze_pcb.py <file.kicad_pcb> --output pcb.json --schematic analysis/schematic.json  # one-off; cross-ref + power-rail auto-detect
 ```
 Outputs structured JSON (~50-300KB depending on board complexity) with:
 - **Core**: footprint inventory (pads, courtyards, net assignments, extended attrs, schematic cross-reference), track/via statistics, zone summaries, board outline/dimensions, routing completeness

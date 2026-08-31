@@ -1578,13 +1578,14 @@ def group_components(footprints: list[dict]) -> dict:
 
 
 def analyze_power_nets(footprints: list[dict], tracks: dict,
-                       net_names: dict[int, str]) -> list[dict]:
+                       net_names: dict[int, str],
+                       power_rails: set[str] | None = None) -> list[dict]:
     """Analyze routing of power/ground nets — track widths, via counts."""
     # EQ-052: d = √(Δx²+Δy²) (Euclidean distance)
     # Identify power/ground nets
     power_nets = {}
     for net_num, name in net_names.items():
-        if is_power_net_name(name) or is_ground_name(name):
+        if is_power_net_name(name, power_rails) or is_ground_name(name):
             power_nets[net_num] = {"name": name, "widths": set(), "track_count": 0,
                                    "total_length_mm": 0.0}
 
@@ -1827,7 +1828,8 @@ def analyze_pad_to_pad_distances(footprints, tracks, vias, net_names):
 def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
                                     signal_nets=None, ref_layer_map=None,
                                     footprints=None, radius_mm=0.5,
-                                    debug_samples=None, vias=None):
+                                    debug_samples=None, vias=None,
+                                    power_rails=None):
     """Check ground/power plane continuity under signal traces.
 
     For each signal net's trace segments, samples points along the trace
@@ -1855,6 +1857,8 @@ def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
             a hit if it falls inside a via's own antipad — that void is
             expected (KiCad clears copper around a via for isolation), not
             a reference-plane gap (KH-392).
+        power_rails: Optional set of net names to treat as power/ground
+            regardless of naming heuristics (KH-393).
 
     Returns:
         List of gap findings: [{net, layer, gap_start_mm, gap_length_mm, ...}]
@@ -1878,7 +1882,7 @@ def analyze_return_path_continuity(tracks, net_names, zones, zone_fills,
         if net <= 0:
             continue
         net_name = net_names.get(net, "")
-        if is_power_net_name(net_name) or is_ground_name(net_name):
+        if is_power_net_name(net_name, power_rails) or is_ground_name(net_name):
             continue
         if signal_nets and net_name not in signal_nets:
             continue
@@ -2461,7 +2465,8 @@ def analyze_ground_domains(footprints: list[dict], net_names: dict[int, str],
 
 
 def analyze_trace_proximity(tracks: dict, net_names: dict[int, str],
-                            grid_size: float = 0.5) -> dict:
+                            grid_size: float = 0.5,
+                            power_rails: set[str] | None = None) -> dict:
     """Identify signal nets with traces running close together on the same layer.
 
     Uses a spatial grid to find net pairs sharing grid cells, indicating
@@ -2504,7 +2509,7 @@ def analyze_trace_proximity(tracks: dict, net_names: dict[int, str],
     pair_counts: dict[tuple[str, int, int], int] = {}
     for (_layer, _gx, _gy), nets in grid.items():
         signal = sorted(n for n in nets
-                        if not (is_power_net_name(net_names.get(n, "")) or is_ground_name(net_names.get(n, ""))))
+                        if not (is_power_net_name(net_names.get(n, ""), power_rails) or is_ground_name(net_names.get(n, ""))))
         if len(signal) < 2:
             continue
         for i in range(len(signal)):
@@ -2535,7 +2540,8 @@ def analyze_trace_proximity(tracks: dict, net_names: dict[int, str],
 
 def analyze_current_capacity(tracks: dict, vias: dict, zones: list[dict],
                              net_names: dict[int, str],
-                             setup: dict) -> dict:
+                             setup: dict,
+                             power_rails: set[str] | None = None) -> dict:
     """Provide facts for current capacity assessment (IPC-2221).
 
     For each net, reports the minimum track width and total copper cross-section
@@ -2619,7 +2625,7 @@ def analyze_current_capacity(tracks: dict, vias: dict, zones: list[dict],
         if data["min_width"] == float("inf"):
             continue
         name = net_names.get(net_num, f"net_{net_num}")
-        is_power = is_power_net_name(name) or is_ground_name(name)
+        is_power = is_power_net_name(name, power_rails) or is_ground_name(name)
 
         entry = {
             "net": name,
@@ -3787,7 +3793,8 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
 
 
 def analyze_layer_transitions(tracks: dict, vias: dict,
-                               net_names: dict[int, str]) -> list[dict]:
+                               net_names: dict[int, str],
+                               power_rails: set[str] | None = None) -> list[dict]:
     """Identify signal net layer transitions (via usage patterns).
 
     For ground return path analysis, higher-level logic needs to know which
@@ -3830,7 +3837,7 @@ def analyze_layer_transitions(tracks: dict, vias: dict,
         if len(data["layers"]) < 2:
             continue
         name = net_names.get(net_num, f"net_{net_num}")
-        if is_power_net_name(name) or is_ground_name(name):
+        if is_power_net_name(name, power_rails) or is_ground_name(name):
             continue  # Power/ground layer transitions are expected
 
         entry = {
@@ -5655,6 +5662,17 @@ def analyze_copper_presence(footprints: list[dict], zones: list[dict],
     return result
 
 
+def _power_rails_from_schematic(schematic_data: dict | None) -> set[str]:
+    """Extract power rail net names from a schematic analysis JSON.
+
+    Reads `statistics.power_rails` — the shape analyze_schematic.py actually
+    emits (list of {name, voltage} dicts) — not a top-level key (KH-393).
+    """
+    stats = (schematic_data or {}).get("statistics") or {}
+    return {r["name"] for r in stats.get("power_rails", [])
+            if isinstance(r, dict) and r.get("name")}
+
+
 def _compute_switching_loop_areas(footprints: list, schematic_data: dict) -> list:
     """Compute hot loop triangle areas for switching regulators.
 
@@ -6292,7 +6310,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
                 include_trace_segments: bool = False,
                 schematic_data: dict = None,
                 return_path_radius_mm: float = 0.5,
-                gp001_debug: bool = False) -> dict:
+                gp001_debug: bool = False,
+                power_rails: set[str] | None = None) -> dict:
     """Main analysis function.
 
     Args:
@@ -6304,6 +6323,11 @@ def analyze_pcb(path: str, *, proximity: bool = False,
             return-path analysis (default 0.5).
         gp001_debug: If True, emit per-sample diagnostic JSON to the
             analysis output directory.
+        power_rails: Optional explicit set of net names to treat as power
+            rails (overrides name heuristics). Takes priority over rails
+            auto-read from `schematic_data`; when neither is given, net
+            classification falls back to name-based heuristics alone
+            (KH-393).
     """
     # KH-363: reset before any extraction touches _net_id() (extract_footprints
     # calls it during pad parsing, before _build_net_mapping() rebuilds it below) —
@@ -6311,6 +6335,18 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     # process can leak a wrong non-zero net_number into this board's pads.
     global _net_name_to_id
     _net_name_to_id = {"": 0}
+
+    # KH-393: resolve which power-rail override (if any) net classification
+    # should use — explicit power_rails > rails auto-read from schematic
+    # analysis > name heuristics alone.
+    if power_rails:
+        _resolved_power_rails, _power_rails_source = power_rails, "cli"
+    else:
+        _sch_rails = _power_rails_from_schematic(schematic_data)
+        if _sch_rails:
+            _resolved_power_rails, _power_rails_source = _sch_rails, "schematic"
+        else:
+            _resolved_power_rails, _power_rails_source = None, "heuristic"
 
     root = parse_file(path)
 
@@ -6370,7 +6406,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
                                       stackup=_stackup if include_trace_segments else None)
 
     # Power net routing analysis
-    power_routing = analyze_power_nets(footprints, tracks, net_names)
+    power_routing = analyze_power_nets(footprints, tracks, net_names,
+                                       power_rails=_resolved_power_rails)
 
     # Pad-to-pad routed distance analysis (only with --full, needs segment data)
     pad_distances = None
@@ -6385,7 +6422,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     ground_domains = analyze_ground_domains(footprints, net_names, zones)
 
     # Current capacity facts
-    current_capacity = analyze_current_capacity(tracks, vias, zones, net_names, setup)
+    current_capacity = analyze_current_capacity(tracks, vias, zones, net_names, setup,
+                                                power_rails=_resolved_power_rails)
 
     # Via analysis (types, annular ring, via-in-pad, fanout, current)
     via_analysis = analyze_vias(vias, footprints, net_names)
@@ -6394,7 +6432,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     thermal = analyze_thermal_vias(footprints, vias, zones)
 
     # Layer transitions for ground return path analysis
-    layer_transitions = analyze_layer_transitions(tracks, vias, net_names)
+    layer_transitions = analyze_layer_transitions(tracks, vias, net_names,
+                                                  power_rails=_resolved_power_rails)
 
     # Placement analysis (courtyard overlaps, edge clearance, density)
     placement = analyze_placement(footprints, outline)
@@ -6477,7 +6516,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
             footprints=footprints,
             radius_mm=return_path_radius_mm,
             debug_samples=gp001_samples,
-            vias=vias)
+            vias=vias,
+            power_rails=_resolved_power_rails)
 
     # Compact footprint output — include pad-to-net mapping but omit pad geometry
     footprint_summary = []
@@ -6538,6 +6578,16 @@ def analyze_pcb(path: str, *, proximity: bool = False,
         result["pad_to_pad_distances"] = pad_distances
     # TH-043-residual: always emit (schema-required); empty list when no power routing.
     result["power_net_routing"] = power_routing if power_routing else []
+
+    # KH-393: record which nets classified as power/ground under the
+    # resolution actually used, and where that resolution came from.
+    result["power_net_resolution"] = {
+        "power": sorted({n for n in net_names.values()
+                         if n and is_power_net_name(n, _resolved_power_rails)}),
+        "ground": sorted({n for n in net_names.values()
+                          if n and is_ground_name(n)}),
+        "source": _power_rails_source,
+    }
     if decoupling:
         result["decoupling_placement"] = decoupling
         # Flat decoupling proximity matrix for EMC/cross-verify consumers
@@ -6574,7 +6624,8 @@ def analyze_pcb(path: str, *, proximity: bool = False,
         result["placement_analysis"] = {"density": placement["density"]}
     result["silkscreen"] = silkscreen
     if proximity:
-        result["trace_proximity"] = analyze_trace_proximity(tracks, net_names)
+        result["trace_proximity"] = analyze_trace_proximity(
+            tracks, net_names, power_rails=_resolved_power_rails)
 
     # board_metadata + design_rule_compliance are required envelope keys
     # (schema declares them dict not Optional[dict]). Always emit, even
@@ -6778,6 +6829,9 @@ def main():
                         help="Write output to analysis cache directory (timestamped runs)")
     parser.add_argument("--schematic",
                         help="Schematic analysis JSON for cross-analyzer enrichment")
+    parser.add_argument('--power-rails', default=None,
+                        help='Comma-separated power net names to treat as rails '
+                             '(overrides name heuristics; normally auto-read from --schematic)')
     parser.add_argument("--text", action="store_true",
                         help="Print human-readable text report to stdout")
     parser.add_argument('--stage', default=None,
@@ -6865,11 +6919,16 @@ def main():
                   f'analysis.', file=sys.stderr)
             schematic_data = None
 
+    power_rails = None
+    if args.power_rails:
+        power_rails = {r.strip() for r in args.power_rails.split(",") if r.strip()}
+
     result = analyze_pcb(args.pcb, proximity=args.proximity,
                          include_trace_segments=args.full,
                          schematic_data=schematic_data,
                          return_path_radius_mm=args.return_path_radius_mm,
-                         gp001_debug=args.gp001_debug)
+                         gp001_debug=args.gp001_debug,
+                         power_rails=power_rails)
     # Inject provenance and drop legacy 'file' key (already removed from
     # internal result assembly, but belt-and-suspenders).
     result["inputs"] = inputs

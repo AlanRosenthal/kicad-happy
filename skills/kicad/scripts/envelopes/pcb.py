@@ -323,6 +323,13 @@ class PCBEnvelope:
                        "total_length_mm, min_width_mm, max_width_mm, "
                        "widths_used}]; empty list when no power routing "
                        "detected. TH-043-residual."})
+    power_net_resolution: dict = field(default_factory=dict, metadata={
+        "description": "Power/ground net classification actually used: "
+                       "{power: [net names], ground: [net names], "
+                       "source: 'cli'|'schematic'|'heuristic'}. source "
+                       "reflects how power rail overrides were resolved — "
+                       "explicit --power-rails, rails auto-read from "
+                       "--schematic, or name heuristics alone (KH-393)."})
     ground_domains: dict = field(default_factory=dict, metadata={
         "description": "Ground topology: domain_count, domains[], "
                        "multi_domain_components. Always emitted; "

@@ -197,6 +197,7 @@ Output of `python3 skills/kicad/scripts/analyze_pcb.py <file>.kicad_pcb`.
 | `board_thickness_mm` | `float \| null` | no | Stackup thickness (mm); duplicated from setup for downstream consumers. Null when the source file has no (general (thickness ...)) entry. TH-043. |
 | `board_metadata` | `dict` | no | Board metadata bag (paper size, title block fragments, etc.); empty dict when no metadata extracted. TH-043. |
 | `power_net_routing` | `list[dict]` | no | Power net routing rollup: [{net, track_count, total_length_mm, min_width_mm, max_width_mm, widths_used}]; empty list when no power routing detected. TH-043-residual. |
+| `power_net_resolution` | `dict` | no | Power/ground net classification actually used: {power: [net names], ground: [net names], source: 'cli'\|'schematic'\|'heuristic'}. source reflects how power rail overrides were resolved — explicit --power-rails, rails auto-read from --schematic, or name heuristics alone (KH-393). |
 | `ground_domains` | `dict` | no | Ground topology: domain_count, domains[], multi_domain_components. Always emitted; domain_count=0 is meaningful (no ground domain found). TH-043-residual. |
 | `placement_density` | `dict` | no | Placement density: board_area_cm2, front_density_per_cm2, optional back_density_per_cm2; empty dict when density not computed. TH-043-residual. |
 | `capability_mode_ref` | `dict \| null` | no | Pointer to canonical analysis/capability_mode.json run-level record. Shape: {source, run_id}. See Phase 4 spec §3.3. |
