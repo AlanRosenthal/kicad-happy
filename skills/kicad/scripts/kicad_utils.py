@@ -1458,25 +1458,49 @@ def estimate_dc_bias_derating(dielectric, package, voltage_ratio):
 def load_kicad_pro(file_path: str) -> dict | None:
     """Load .kicad_pro from the same directory as a .kicad_sch or .kicad_pcb file.
 
-    Scans the directory for a ``*.kicad_pro`` file (there should be exactly one).
+    Scans the directory for ``*.kicad_pro`` files and prefers the one whose
+    stem matches ``file_path``'s stem (KiCad names a project file after the
+    board/schematic it belongs to). Falls back to the sole candidate when
+    there's only one; with multiple candidates and no stem match, uses the
+    first (sorted) candidate and warns on stderr (KH-362 — a directory with
+    several projects previously took whatever the OS listed first).
     Returns the parsed JSON dict, or None if not found, not valid JSON, or a
     KiCad 5 ``.pro`` file (which uses a different, non-JSON format).
+    Tolerates JS-style comments / trailing commas (KH-368-style JSONC).
     """
-    import json as _json
+    import sys as _sys
     parent = os.path.dirname(os.path.abspath(file_path))
+    stem = os.path.splitext(os.path.basename(file_path))[0]
     try:
         entries = os.listdir(parent)
     except OSError:
         return None
-    for fname in entries:
-        if fname.endswith('.kicad_pro'):
-            pro_path = os.path.join(parent, fname)
-            try:
-                with open(pro_path) as f:
-                    return _json.load(f)
-            except (ValueError, OSError):
-                return None
-    return None
+    candidates = sorted(f for f in entries if f.endswith('.kicad_pro'))
+    if not candidates:
+        return None
+
+    exact = [f for f in candidates if os.path.splitext(f)[0] == stem]
+    if exact:
+        chosen = exact[0]
+    elif len(candidates) == 1:
+        chosen = candidates[0]
+    else:
+        chosen = candidates[0]
+        print(
+            "kicad_utils.load_kicad_pro: {0} .kicad_pro files in {1!r}, "
+            "none match stem {2!r}; using {3!r}".format(
+                len(candidates), parent, stem, chosen),
+            file=_sys.stderr,
+        )
+
+    pro_path = os.path.join(parent, chosen)
+    try:
+        # Local import: project_config has no kicad_utils dependency, so
+        # this doesn't introduce a cycle (KH-362 pre-flight check).
+        from project_config import load_jsonc
+        return load_jsonc(pro_path)
+    except (ValueError, OSError):
+        return None
 
 
 def is_referenced_as_child(file_path: str) -> bool:
@@ -1777,20 +1801,38 @@ def load_kicad_dru(file_path: str) -> list[dict] | None:
 
     Conditions are kept as raw strings — not evaluated.
     Returns None if no ``.kicad_dru`` found.
+
+    Scans the directory for ``*.kicad_dru`` files and prefers the one whose
+    stem matches ``file_path``'s stem, same discovery rule as
+    ``load_kicad_pro`` (KH-362).
     """
     from sexp_parser import parse as _sexp_parse, find_all, find_first, get_value
+    import sys as _sys
 
     parent = os.path.dirname(os.path.abspath(file_path))
-    dru_path = None
+    stem = os.path.splitext(os.path.basename(file_path))[0]
     try:
-        for fname in os.listdir(parent):
-            if fname.endswith('.kicad_dru'):
-                dru_path = os.path.join(parent, fname)
-                break
+        entries = os.listdir(parent)
     except OSError:
         return None
-    if not dru_path:
+    candidates = sorted(f for f in entries if f.endswith('.kicad_dru'))
+    if not candidates:
         return None
+
+    exact = [f for f in candidates if os.path.splitext(f)[0] == stem]
+    if exact:
+        chosen = exact[0]
+    elif len(candidates) == 1:
+        chosen = candidates[0]
+    else:
+        chosen = candidates[0]
+        print(
+            "kicad_utils.load_kicad_dru: {0} .kicad_dru files in {1!r}, "
+            "none match stem {2!r}; using {3!r}".format(
+                len(candidates), parent, stem, chosen),
+            file=_sys.stderr,
+        )
+    dru_path = os.path.join(parent, chosen)
 
     try:
         with open(dru_path, 'r', encoding='utf-8', errors='replace') as f:
