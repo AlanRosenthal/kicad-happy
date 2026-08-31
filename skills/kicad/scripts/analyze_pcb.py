@@ -45,6 +45,8 @@ from capability_mode import get_capability_mode_ref
 
 ANALYZER_SOURCE = "pcb"
 
+MAX_TESTED_FORMAT_VERSION = 20260206  # bump when a newer corpus era is adopted
+
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
@@ -6387,6 +6389,16 @@ def analyze_pcb(path: str, *, proximity: bool = False,
     version = get_value(root, "version") or "unknown"
     generator_version = get_value(root, "generator_version") or "unknown"
 
+    try:
+        _v = int(version)
+    except (TypeError, ValueError):
+        _v = None
+    format_newer_note = None
+    if _v is not None and _v > MAX_TESTED_FORMAT_VERSION:
+        format_newer_note = (
+            f"file format version {_v} is newer than the max tested "
+            f"({MAX_TESTED_FORMAT_VERSION}); analysis is best-effort")
+
     # Component grouping by reference prefix
     component_groups = group_components(footprints)
 
@@ -6794,6 +6806,23 @@ def analyze_pcb(path: str, *, proximity: bool = False,
         findings.extend(copper.get('touch_pad_gnd_clearance', []))
         if copper.get('opposite_layer_summary'):
             result['copper_presence_summary'] = copper['opposite_layer_summary']
+
+    if format_newer_note:
+        findings.append({
+            "detector": "format_version_gate",
+            "rule_id": "FV-001",
+            "category": "file_format",
+            "severity": "info",
+            "confidence": "deterministic",
+            "evidence_source": "topology",
+            "summary": format_newer_note,
+            "description": format_newer_note,
+            "components": [],
+            "nets": [],
+            "pins": [],
+            "recommendation": "",
+            "report_context": {"section": "File Format", "impact": "", "standard_ref": ""},
+        })
 
     # Deterministic order for byte-identical repeated runs (KH-316).
     sort_findings(findings)

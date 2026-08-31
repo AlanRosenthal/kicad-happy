@@ -165,6 +165,8 @@ def _resolve_lookup_paths(sch_path: str | Path,
 
 ANALYZER_SOURCE = "sch"
 
+MAX_TESTED_FORMAT_VERSION = 20260306  # bump when a newer corpus era is adopted
+
 # ---------------------------------------------------------------------------
 # Case-insensitive distributor / MPN property helpers
 # ---------------------------------------------------------------------------
@@ -9450,6 +9452,16 @@ def analyze_schematic(path: str, project_root: str | None = None,
     generator_version = parsed["generator_version"]
     file_version = parsed["file_version"]
 
+    try:
+        _v = int(file_version)
+    except (TypeError, ValueError):
+        _v = None
+    format_newer_note = None
+    if _v is not None and _v > MAX_TESTED_FORMAT_VERSION:
+        format_newer_note = (
+            f"file format version {_v} is newer than the max tested "
+            f"({MAX_TESTED_FORMAT_VERSION}); analysis is best-effort")
+
     # Build net map across all sheets
     nets = build_net_map(all_components, all_wires, all_labels, power_symbols, all_junctions,
                          all_no_connects,
@@ -9659,6 +9671,16 @@ def analyze_schematic(path: str, project_root: str | None = None,
     # UC-001..004 — USB compliance check failures (KH-338)
     if usb_compliance:
         findings.extend(usb_compliance.pop("findings", []))
+
+    if format_newer_note:
+        findings.append(make_finding(
+            detector="format_version_gate", rule_id="FV-001",
+            category="file_format",
+            summary=format_newer_note,
+            description=format_newer_note,
+            severity="info", confidence="deterministic",
+            evidence_source="topology",
+        ))
 
     # Build severity summary
     sev_counts = {"error": 0, "warning": 0, "info": 0}
