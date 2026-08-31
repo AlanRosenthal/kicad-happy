@@ -6267,6 +6267,13 @@ def analyze_pcb(path: str, *, proximity: bool = False,
         gp001_debug: If True, emit per-sample diagnostic JSON to the
             analysis output directory.
     """
+    # KH-363: reset before any extraction touches _net_id() (extract_footprints
+    # calls it during pad parsing, before _build_net_mapping() rebuilds it below) —
+    # otherwise a stale mapping from a prior analyze_pcb() call in the same
+    # process can leak a wrong non-zero net_number into this board's pads.
+    global _net_name_to_id
+    _net_name_to_id = {"": 0}
+
     root = parse_file(path)
 
     layers = extract_layers(root)
