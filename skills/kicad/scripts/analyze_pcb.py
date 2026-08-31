@@ -35,7 +35,8 @@ from sexp_parser import (
 from kicad_utils import (is_ground_name, is_power_net_name,
                          load_kicad_pro, extract_pro_net_classes,
                          extract_pro_design_rules, extract_pro_text_variables,
-                         load_kicad_dru, load_lib_tables)
+                         load_kicad_dru, load_lib_tables,
+                         find_project_settings_file)
 from pcb_connectivity import build_connectivity_graph
 from finding_schema import compute_trust_summary, sort_findings, assign_finding_ids
 from envelopes.pcb import PCBEnvelope
@@ -6500,12 +6501,11 @@ def analyze_pcb(path: str, *, proximity: bool = False,
             net_classes = extract_net_classes(root)
         pro_rules = extract_pro_design_rules(pro)
         pro_text_vars = extract_pro_text_variables(pro)
-        pcb_dir = os.path.dirname(str(path)) or '.'
+        # KH-362: name the file that was actually loaded above, not an
+        # independent (and previously unsorted, first-glob-wins) rescan.
         project_settings = {
             'source': os.path.basename(
-                next((os.path.join(pcb_dir, f)
-                      for f in os.listdir(pcb_dir)
-                      if f.endswith('.kicad_pro')), '')),
+                find_project_settings_file(str(path), '.kicad_pro') or ''),
         }
         if pro_net_classes:
             project_settings['net_classes'] = pro_net_classes

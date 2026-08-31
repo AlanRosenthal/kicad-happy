@@ -1455,18 +1455,21 @@ def estimate_dc_bias_derating(dielectric, package, voltage_ratio):
 # .kicad_pro project file parsing
 # ======================================================================
 
-def load_kicad_pro(file_path: str) -> dict | None:
-    """Load .kicad_pro from the same directory as a .kicad_sch or .kicad_pcb file.
+def find_project_settings_file(file_path: str, ext: str) -> str | None:
+    """Find the ``ext`` file (e.g. ``.kicad_pro``, ``.kicad_dru``) matching
+    ``file_path``'s project, in ``file_path``'s directory.
 
-    Scans the directory for ``*.kicad_pro`` files and prefers the one whose
-    stem matches ``file_path``'s stem (KiCad names a project file after the
-    board/schematic it belongs to). Falls back to the sole candidate when
-    there's only one; with multiple candidates and no stem match, uses the
-    first (sorted) candidate and warns on stderr (KH-362 — a directory with
-    several projects previously took whatever the OS listed first).
-    Returns the parsed JSON dict, or None if not found, not valid JSON, or a
-    KiCad 5 ``.pro`` file (which uses a different, non-JSON format).
-    Tolerates JS-style comments / trailing commas (KH-368-style JSONC).
+    Shared discovery logic for `load_kicad_pro` / `load_kicad_dru` (KH-362).
+    Scans the directory for files ending in ``ext`` and prefers the one
+    whose stem matches ``file_path``'s stem (KiCad names project/rules
+    files after the board/schematic they belong to). Falls back to the
+    sole candidate when there's only one; with multiple candidates and no
+    stem match, deterministically picks the first (sorted) candidate and
+    warns on stderr (a directory with several projects previously took
+    whatever the OS listed first).
+
+    Returns the chosen file's full path, or None if no candidate exists
+    or the directory can't be listed.
     """
     import sys as _sys
     parent = os.path.dirname(os.path.abspath(file_path))
@@ -1475,7 +1478,7 @@ def load_kicad_pro(file_path: str) -> dict | None:
         entries = os.listdir(parent)
     except OSError:
         return None
-    candidates = sorted(f for f in entries if f.endswith('.kicad_pro'))
+    candidates = sorted(f for f in entries if f.endswith(ext))
     if not candidates:
         return None
 
@@ -1487,13 +1490,28 @@ def load_kicad_pro(file_path: str) -> dict | None:
     else:
         chosen = candidates[0]
         print(
-            "kicad_utils.load_kicad_pro: {0} .kicad_pro files in {1!r}, "
-            "none match stem {2!r}; using {3!r}".format(
-                len(candidates), parent, stem, chosen),
+            "kicad_utils.find_project_settings_file: {0} {1} files in "
+            "{2!r}, none match stem {3!r}; using {4!r}".format(
+                len(candidates), ext, parent, stem, chosen),
             file=_sys.stderr,
         )
 
-    pro_path = os.path.join(parent, chosen)
+    return os.path.join(parent, chosen)
+
+
+def load_kicad_pro(file_path: str) -> dict | None:
+    """Load .kicad_pro from the same directory as a .kicad_sch or .kicad_pcb file.
+
+    Discovery is stem-matched via `find_project_settings_file` (KH-362) —
+    in a multi-project directory, the ``.kicad_pro`` sharing this file's
+    stem is preferred over whatever the OS lists first.
+    Returns the parsed JSON dict, or None if not found, not valid JSON, or a
+    KiCad 5 ``.pro`` file (which uses a different, non-JSON format).
+    Tolerates JS-style comments / trailing commas (KH-368-style JSONC).
+    """
+    pro_path = find_project_settings_file(file_path, '.kicad_pro')
+    if not pro_path:
+        return None
     try:
         # Local import: project_config has no kicad_utils dependency, so
         # this doesn't introduce a cycle (KH-362 pre-flight check).
@@ -1802,37 +1820,14 @@ def load_kicad_dru(file_path: str) -> list[dict] | None:
     Conditions are kept as raw strings — not evaluated.
     Returns None if no ``.kicad_dru`` found.
 
-    Scans the directory for ``*.kicad_dru`` files and prefers the one whose
-    stem matches ``file_path``'s stem, same discovery rule as
-    ``load_kicad_pro`` (KH-362).
+    Discovery is stem-matched via `find_project_settings_file`, same rule
+    as ``load_kicad_pro`` (KH-362).
     """
     from sexp_parser import parse as _sexp_parse, find_all, find_first, get_value
-    import sys as _sys
 
-    parent = os.path.dirname(os.path.abspath(file_path))
-    stem = os.path.splitext(os.path.basename(file_path))[0]
-    try:
-        entries = os.listdir(parent)
-    except OSError:
+    dru_path = find_project_settings_file(file_path, '.kicad_dru')
+    if not dru_path:
         return None
-    candidates = sorted(f for f in entries if f.endswith('.kicad_dru'))
-    if not candidates:
-        return None
-
-    exact = [f for f in candidates if os.path.splitext(f)[0] == stem]
-    if exact:
-        chosen = exact[0]
-    elif len(candidates) == 1:
-        chosen = candidates[0]
-    else:
-        chosen = candidates[0]
-        print(
-            "kicad_utils.load_kicad_dru: {0} .kicad_dru files in {1!r}, "
-            "none match stem {2!r}; using {3!r}".format(
-                len(candidates), parent, stem, chosen),
-            file=_sys.stderr,
-        )
-    dru_path = os.path.join(parent, chosen)
 
     try:
         with open(dru_path, 'r', encoding='utf-8', errors='replace') as f:
