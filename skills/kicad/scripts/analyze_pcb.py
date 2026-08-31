@@ -4805,10 +4805,16 @@ def analyze_design_rule_compliance(
             })
 
     # --- Custom rules summary (advisory) ---
-    # We don't evaluate condition expressions, but we can check
-    # unconditional global constraints from .kicad_dru
+    # We don't evaluate condition expressions, so conditional rules are
+    # skipped entirely rather than applied as board-wide minimums
+    # (KH-361) — only unconditional global constraints from .kicad_dru
+    # are checked.
+    conditional_rules_skipped = []
     if custom_rules:
         for rule in custom_rules:
+            if rule.get('condition'):
+                conditional_rules_skipped.append(rule.get('name', ''))
+                continue
             for constraint in rule.get('constraints', []):
                 ctype = constraint.get('type', '')
                 cmin = constraint.get('min')
@@ -4860,6 +4866,13 @@ def analyze_design_rule_compliance(
         result['net_class_violations'] = unique_nc_violations
     if custom_rules:
         result['custom_rules_count'] = len(custom_rules)
+    if conditional_rules_skipped:
+        skipped_sorted = sorted(conditional_rules_skipped)
+        result['conditional_rules_skipped'] = skipped_sorted
+        result['conditional_rules_skipped_count'] = len(skipped_sorted)
+        result['conditional_rules_note'] = (
+            f"{len(skipped_sorted)} conditional rules not evaluated "
+            f"(condition support: none) — not applied board-wide")
 
     return result
 
