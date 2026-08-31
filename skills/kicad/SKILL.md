@@ -764,7 +764,7 @@ For script internals, data structures, signal analysis patterns, and batch test 
 | `.net` / `.xml` | S-expr/XML | Netlist export, BOM export |
 | `.gbr` / `.g*` / `.drl` | Gerber/Excellon | Manufacturing files (copper, mask, silk, outline, drill) |
 
-For version detection and detailed field-by-field format documentation, read `references/file-formats.md`. On Flatpak KiCad installs `kicad-cli` (native DRC/ERC reports, file exports) is not on PATH — invoke it as `flatpak run --command=kicad-cli org.kicad.KiCad <args>`.
+For version detection and detailed field-by-field format documentation, read `references/file-formats.md`. On Flatpak KiCad installs `kicad-cli` (native DRC/ERC reports, file exports) is not on PATH — invoke it as `flatpak run --command=kicad-cli org.kicad.KiCad <args>`; its sandbox can't read host `/tmp`, so write exports/netlists under the project directory (or elsewhere under `$HOME`) instead.
 
 ## Analysis Strategies
 
