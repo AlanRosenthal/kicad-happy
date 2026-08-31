@@ -1489,7 +1489,7 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
                 if role in ("local", "hier"):
                     bus_named_labels.append((s, bare, lbl["x"], lbl["y"]))
             else:
-                g.note_unresolved("bus-name label not on a bus wire", bare)
+                g.note_unresolved("label_not_on_bus_wire", bare)
         for g in bus_graphs.values():
             g.finalize()
 
@@ -1667,8 +1667,11 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
         # When several member wires of one bus are shorted together (e.g. all
         # tied to GND), the tapped net carries every one of those labels — KiCad
         # collapses those members to a single net, so we union the tap with each
-        # matched member slot (sorted for determinism). Only a tap whose net
-        # carries no member label is genuinely unresolved.
+        # matched member slot (sorted for determinism). A tap whose net carries
+        # no label at all is genuinely unlabeled; a tap whose net DOES carry a
+        # label that just isn't one of this bus's member names is a distinct
+        # failure (the label misnamed/mistargeted, not absent) — kept separate
+        # so the reason says what was actually unresolved.
         for s, tk, tap in tap_points:
             g = bus_graphs[s]
             names = root_names.get(find(tk), set())
@@ -1677,8 +1680,10 @@ def build_net_map(components: list[dict], wires: list[dict], labels: list[dict],
             if cand:
                 for member in sorted(cand):
                     union(tk, bus_slot(s, tap["cluster"], member))
+            elif names:
+                g.note_unresolved("entry_tap_name_not_in_bus", sorted(names)[0])
             else:
-                g.note_unresolved("unlabelled bus entry tap", None)
+                g.note_unresolved("unlabeled_entry_tap", None)
 
         # (C) Positional sheet-pin port matching.
         pin_ports, hier_ports = [], []
