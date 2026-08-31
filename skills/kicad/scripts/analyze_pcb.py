@@ -6042,10 +6042,8 @@ def analyze_via_in_pad(footprints: list[dict], vias: dict, thermal_pad_refs: set
         for ref, pad_num, net, ppx, ppy, pw, ph, pshape, pangle in smd_pads:
             if _point_in_pad(vx, vy, ppx, ppy, pw, ph, pshape, pangle):
                 # Check tenting
-                via_layers = via.get("layers", [])
-                # A via is tented if it has solder mask coverage (heuristic: look for F.Mask/B.Mask)
-                # KiCad doesn't export tenting directly in kicad_pcb; approximate from remove_unused_layers
-                tented = via.get("remove_unused_layers", False)
+                tenting = via.get("tenting", [])
+                tented = len(tenting) > 0
                 severity = "info" if tented else "warning"
                 findings.append({
                     "component": ref,
