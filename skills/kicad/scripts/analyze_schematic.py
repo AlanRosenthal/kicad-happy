@@ -5225,6 +5225,22 @@ def validate_footprint_filters(components: list[dict], lib_symbols: dict) -> lis
     return warnings
 
 
+def _bom_real_components(components: list[dict]) -> list[dict]:
+    """Filter to components that count as real BOM parts.
+
+    Excludes power symbols/flags, test points, mounting holes, fiducials,
+    graphics, DNP parts, and anything not marked in_bom. Shared by
+    audit_datasheet_coverage (DS-001/002/003) and audit_sourcing_gate
+    (SS-001/002/003) — both need the same "real BOM part" definition
+    (KH-390).
+    """
+    return [c for c in components
+            if c.get("type") not in ("power_symbol", "power_flag", "flag",
+                                     "test_point", "mounting_hole",
+                                     "fiducial", "graphic")
+            and c.get("in_bom") and not c.get("dnp")]
+
+
 def audit_datasheet_coverage(components: list[dict],
                              project_dir: str) -> list[dict]:
     """Emit a banner-level finding when datasheet evidence is absent.
@@ -5241,11 +5257,7 @@ def audit_datasheet_coverage(components: list[dict],
     MPNs are set — offer to sync).
     """
     findings: list[dict] = []
-    real = [c for c in components
-            if c.get("type") not in ("power_symbol", "power_flag", "flag",
-                                     "test_point", "mounting_hole",
-                                     "fiducial", "graphic")
-            and c.get("in_bom") and not c.get("dnp")]
+    real = _bom_real_components(components)
     # Deduplicate by reference (multi-unit symbols)
     seen = set()
     unique = []
@@ -5298,13 +5310,29 @@ def audit_datasheet_coverage(components: list[dict],
             pass
 
     # Build finding.
-    refs_without_mpn = sorted(c.get("reference", "")
-                              for c in unique if not c.get("mpn"))[:20]
-
     if ds_dir_found and ds_file_count > 0:
         # Datasheets present — no banner needed. Emit info-only if coverage
-        # is partial so the reviewer knows which refs are ungrounded.
-        if mpn_pct < 90 and refs_without_mpn:
+        # is partial so the reviewer knows which lines are ungrounded.
+        # DS-003 counts by unique BOM line (value + footprint), the same
+        # basis SS-002 uses — a line has coverage if ANY instance carries
+        # an MPN (KH-390: the two denominators used to disagree).
+        line_groups: dict[tuple, dict] = {}
+        for c in real:
+            key = (c.get("value", ""), c.get("footprint", ""))
+            line = line_groups.setdefault(key, {"refs": [], "has_mpn": False})
+            r = c.get("reference", "")
+            if r:
+                line["refs"].append(r)
+            if c.get("mpn"):
+                line["has_mpn"] = True
+        line_total = len(line_groups)
+        missing_lines = [line for line in line_groups.values()
+                         if not line["has_mpn"]]
+        line_pct = ((line_total - len(missing_lines)) / line_total * 100
+                    if line_total else 0.0)
+        refs_without_mpn = sorted(
+            {r for line in missing_lines for r in line["refs"]})[:20]
+        if line_pct < 90 and refs_without_mpn:
             findings.append({
                 "detector": "audit_datasheet_coverage",
                 "rule_id": "DS-003",
@@ -5313,15 +5341,16 @@ def audit_datasheet_coverage(components: list[dict],
                 "evidence_source": "bom",
                 "category": "verification",
                 "summary": (f"Datasheets present ({ds_file_count} files) but "
-                            f"{total - mpn_count}/{total} BOM parts lack an "
-                            "MPN — those parts can't be cross-referenced."),
+                            f"{len(missing_lines)} of {line_total} unique "
+                            "BOM lines lack an MPN — those lines can't be "
+                            "cross-referenced."),
                 "components": refs_without_mpn,
                 "nets": [],
                 "pins": [],
                 "datasheets_dir": ds_dir_found,
                 "datasheet_file_count": ds_file_count,
-                "bom_size": total,
-                "mpn_coverage_percent": round(mpn_pct, 1),
+                "bom_size": line_total,
+                "mpn_coverage_percent": round(line_pct, 1),
                 "recommendation": ("Set the MPN field on the listed parts "
                                    "and re-sync datasheets so every BOM "
                                    "entry has manufacturer evidence."),
@@ -5464,11 +5493,7 @@ def audit_sourcing_gate(components: list[dict]) -> list[dict]:
     mpn_percent == 100 emits nothing.
     """
     findings: list[dict] = []
-    real = [c for c in components
-            if c.get("type") not in ("power_symbol", "power_flag", "flag",
-                                     "test_point", "mounting_hole",
-                                     "fiducial", "graphic")
-            and c.get("in_bom") and not c.get("dnp")]
+    real = _bom_real_components(components)
     if not real:
         return findings
 
@@ -5504,7 +5529,7 @@ def audit_sourcing_gate(components: list[dict]) -> list[dict]:
                     f"({covered}/{total} unique parts). Board is not pre-fab ready.")
     elif pct < 80.0:
         rid, sev = "SS-002", "warning"
-        headline = (f"Sourcing gap: {covered}/{total} unique BOM parts have an MPN "
+        headline = (f"Sourcing gap: {covered}/{total} unique BOM lines have an MPN "
                     f"({pct:.0f}%). Populate before fab.")
     else:
         rid, sev = "SS-003", "info"
