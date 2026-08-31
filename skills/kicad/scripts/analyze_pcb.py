@@ -3696,10 +3696,14 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
             d_top = cy - by_min
             d_bottom = by_max - cy
             min_edge = min(d_left, d_right, d_top, d_bottom)
+            fp_min_x = fp_max_x = cx
+            fp_min_y = fp_max_y = cy
 
             # Use courtyard if available for tighter estimate
             if fp.get("courtyard"):
                 cy_box = fp["courtyard"]
+                fp_min_x, fp_max_x = cy_box["min_x"], cy_box["max_x"]
+                fp_min_y, fp_max_y = cy_box["min_y"], cy_box["max_y"]
                 min_edge = min(
                     cy_box["min_x"] - bx_min,
                     bx_max - cy_box["max_x"],
@@ -3709,6 +3713,12 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
 
             if min_edge < 1.0:  # Flag components within 1mm of edge
                 clearance = round(min_edge, 2)
+                # KH-389: a bbox entirely outside the outline bbox isn't "near
+                # the edge" — it's off the board. Distinct classification,
+                # checked ahead of the RF/edge-mount exemptions below (those
+                # are for by-design partial overhang, not fully-off-board).
+                is_off_board = (fp_max_x < bx_min or fp_min_x > bx_max or
+                                 fp_max_y < by_min or fp_min_y > by_max)
                 # RF module footprints deliberately put the courtyard past the
                 # board edge to expose the antenna to free space (WROOM-1 etc.).
                 # Edge-mount footprints (SMA_Edge, USB_C vertical, MagJack,
@@ -3717,7 +3727,10 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                 # to info with a hint.
                 is_rf = _is_rf_module(fp)
                 is_edge_mount = _is_edge_mount_footprint(fp)
-                if is_rf:
+                if is_off_board:
+                    severity = 'warning'
+                    rf_suffix = ''
+                elif is_rf:
                     severity = 'info'
                     rf_suffix = (' (RF module antenna at board edge — '
                                  'verify antenna clearance, not a body collision)')
@@ -3736,9 +3749,23 @@ def analyze_placement(footprints: list[dict], outline: dict) -> dict:
                                 f"during depaneling or handling.")
                 _recommendation = (f"Move {fp['reference']} further from board edge "
                                    f"(currently {clearance}mm, recommend >= 1.0mm)")
-                if clearance < 0 and not is_rf and not is_edge_mount:
-                    # KH-344: negative clearance means the courtyard overhangs
-                    # the outline — "move further from edge" is nonsense there.
+                if is_off_board:
+                    # KH-389: fully outside the outline — distinct from an
+                    # overhang, never rendered as a negative distance.
+                    _summary = (f"{fp['reference']} placed off-board "
+                                f"({abs(clearance):.1f} mm outside outline)")
+                    _description = (f"Component {fp['reference']} on {fp['layer']} has "
+                                    f"its footprint entirely outside the board outline "
+                                    f"({abs(clearance):.1f}mm outside), not merely "
+                                    f"overhanging the edge.")
+                    _recommendation = (f"Move {fp['reference']} onto the board — its "
+                                       f"footprint currently lies completely outside "
+                                       f"the outline.")
+                elif clearance < 0:
+                    # KH-344/KH-389: negative clearance means the courtyard
+                    # overhangs the outline — "move further from edge" is
+                    # nonsense there. Applies regardless of the RF/edge-mount
+                    # exemption (those only demote severity, not the message).
                     _summary = (f"{fp['reference']} courtyard overhangs board "
                                 f"edge by {abs(clearance)}mm")
                     _description = (f"Component {fp['reference']} on {fp['layer']} has "
