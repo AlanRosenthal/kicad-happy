@@ -10,7 +10,12 @@
 #   1. Explicit INPUT_SCHEMATIC (already in SCHEMATIC) wins as-is.
 #   2. Exactly one .kicad_pro anywhere -> its sibling <stem>.kicad_sch.
 #   3. Else exactly one .kicad_sch anywhere -> that file.
-#   4. Else fail loudly, listing every .kicad_sch candidate on stderr.
+#   4. Else, if PCB was also not explicitly given: fail loudly, listing
+#      every .kicad_sch candidate on stderr. If PCB WAS explicitly
+#      given, don't fail — leave SCHEMATIC empty and let the caller
+#      proceed PCB-only (a PCB-only invocation with zero/ambiguous
+#      schematics is a legitimate, previously-working case; only note
+#      it on stderr).
 # PCB mirrors the same project-stem preference, falling back to the
 # single .kicad_pcb next to the chosen schematic.
 
@@ -34,10 +39,14 @@ if [ -z "$SCHEMATIC" ]; then
         fi
     fi
     if [ -z "$SCHEMATIC" ]; then
-        echo "::error::Multiple (or zero) KiCad projects found; set the 'schematic' input explicitly. Candidates:" >&2
-        find . -name "*.kicad_sch" -not -path "./.git/*" -not -path "*/backup/*" \
-            -not -path "*/backups/*" -not -name "_autosave-*" >&2 2>/dev/null
-        exit 1
+        if [ -z "$PCB" ]; then
+            echo "::error::Multiple (or zero) KiCad projects found; set the 'schematic' input explicitly. Candidates:" >&2
+            find . -name "*.kicad_sch" -not -path "./.git/*" -not -path "*/backup/*" \
+                -not -path "*/backups/*" -not -name "_autosave-*" >&2 2>/dev/null
+            exit 1
+        else
+            echo "::notice::Could not auto-detect a unique schematic (none or multiple found); proceeding PCB-only. Set the 'schematic' input to include schematic analysis." >&2
+        fi
     fi
 fi
 
