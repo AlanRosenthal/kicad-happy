@@ -365,6 +365,10 @@ class PCBEnvelope:
     connectivity_graph: Optional[dict] = field(default=None, metadata={
         "description": "Per-net connectivity graph (island map). "
                        "Emitted only in --full mode."})
+    connectivity_graph_error: Optional[str] = field(default=None, metadata={
+        "description": "Present when --full connectivity graph construction "
+                       "failed; downstream cross-analysis checks that need "
+                       "it were skipped."})
     pad_to_pad_distances: Optional[dict] = field(default=None, metadata={
         "description": "Pad-to-pad routing distances keyed by 'R1.2-D1.1' "
                        "style endpoints. Emitted only in --full mode."})

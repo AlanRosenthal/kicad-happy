@@ -6706,8 +6706,14 @@ def analyze_pcb(path: str, *, proximity: bool = False,
                 footprints, tracks, vias, zone_fills, zones, net_names)
             if conn_graph:
                 result["connectivity_graph"] = conn_graph
-        except Exception:
-            pass  # Non-critical — degrade gracefully
+        except Exception as e:
+            err_str = str(e)[:200]
+            result["connectivity_graph_error"] = (
+                f"connectivity graph unavailable: {type(e).__name__}: {err_str}")
+            print(
+                f"Warning: connectivity graph build failed: "
+                f"{type(e).__name__}: {err_str}",
+                file=sys.stderr)
 
     # --- Harmonization: collect all findings into top-level list ---
     findings = []
