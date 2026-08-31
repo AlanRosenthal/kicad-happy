@@ -9638,14 +9638,41 @@ def analyze_schematic(path: str, project_root: str | None = None,
         _comp.pop("_unit_pins", None)
 
     # Flatten signal_analysis: all list values become findings, dict values promote to top level
+    # KH-388: detect_voltage_dividers' feedback-network path deliberately
+    # appends the SAME finding dict to both the `voltage_dividers` and
+    # `feedback_networks` signal_analysis lists — see the 8c36212 cascade
+    # warning in signal_detectors.py:324-346; that double-emission must
+    # stay, it feeds detect_rc_filters' exclusion set. Dedup here instead
+    # so the shared object doesn't also duplicate in the flattened
+    # findings[] output. id()-based dedup is safe for ANY detector (a
+    # dict appearing twice in the SAME analysis output is always the same
+    # aliasing quirk noted in finding_schema.py's assign_finding_ids). The
+    # (detector, components) key belt is scoped to detect_voltage_dividers
+    # only — other detectors (e.g. VM-001) legitimately emit multiple
+    # distinct findings for the same component pair on different nets, so
+    # a components-only key would wrongly collapse those. Order-preserving
+    # (first occurrence wins).
     findings = []
+    _flatten_seen_ids = set()
+    _flatten_seen_vd_keys = set()
     for _sa_key, _sa_value in signal_analysis.items():
         if isinstance(_sa_value, list):
             _det_name = f"detect_{_sa_key}"
             for _item in _sa_value:
                 if isinstance(_item, dict) and "detector" not in _item:
                     _item["detector"] = _det_name
-            findings.extend(_sa_value)
+            for _item in _sa_value:
+                if isinstance(_item, dict):
+                    _iid = id(_item)
+                    if _iid in _flatten_seen_ids:
+                        continue
+                    _flatten_seen_ids.add(_iid)
+                    if _item.get("detector") == "detect_voltage_dividers":
+                        _vkey = (_item.get("detector"), tuple(_item.get("components") or []))
+                        if _vkey in _flatten_seen_vd_keys:
+                            continue
+                        _flatten_seen_vd_keys.add(_vkey)
+                findings.append(_item)
 
     # Datasheet-coverage audit findings (DS-001 / DS-002 / DS-003) surface
     # up front so reviewers can't miss the "this is a consistency-only
