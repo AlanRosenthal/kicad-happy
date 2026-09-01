@@ -11,7 +11,7 @@ Install: `/plugin marketplace add aklofas/kicad-happy` (Claude Code), `agy plugi
 ## Documentation
 
 - [Contributing Guide](https://github.com/aklofas/kicad-happy/blob/main/CONTRIBUTING.md): How detectors work, how to add skills, test harness, code style
-- [Validation Summary](https://github.com/aklofas/kicad-happy/blob/main/VALIDATION.md): Test methodology, 5,800+ project corpus, 2.3M+ regression assertions
+- [Validation Summary](https://github.com/aklofas/kicad-happy/blob/main/VALIDATION.md): Test methodology, 5,800+ project corpus, 2.7M+ regression assertions
 - [Release notes](https://github.com/aklofas/kicad-happy/blob/main/release-notes.md): Per-release stories with upgrade notes
 - [Changelog](https://github.com/aklofas/kicad-happy/blob/main/CHANGELOG.md): Full release history
 

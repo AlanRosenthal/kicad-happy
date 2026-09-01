@@ -222,8 +222,8 @@ Each closed analyzer issue has a corresponding bugfix regression guard assertion
 | SPICE simulations | 36,565 |
 | Components parsed | 1,305,789 |
 | Nets traced | 2,090,189 |
-| Regression assertions | 2,364,698 at 100% |
+| Regression assertions | 2,756,969 at 100% |
 | Bugfix guards | 103 (100% — no regressions) |
 | Closed issues | 278 analyzer + 31 harness |
-| Open issues | 0 analyzer + 4 harness |
+| Open issues | 26 analyzer + 8 harness |
 | Schematic detectors | 65 |

@@ -2,6 +2,14 @@
 
 The story of each kicad-happy release — what changed and why it matters when upgrading. For line-level detail, see the [CHANGELOG](CHANGELOG.md).
 
+## 🔧 v2.2.1 — Maintenance batch
+
+Twenty-five verified fixes, no new subsystems — nearly all of them traceable to someone who took the time to file a precise report. Curtis Galloway's two reports killed the loudest false-positive pair in PCB analysis: GP-001 no longer reads every ordinary via's antipad as a return-path hole, and schematic-declared power rails now actually reach the PCB net classifier, so `P1_VBUS`-style per-port rails stop masquerading as signals. William Leismer's report ended the "Internal Reference, Oscillator, and Comparator" false oscillator cascade; Erik Norfelt's fixed BE-001 measuring board-edge distance to a rectangle's diagonal. And danielboston38 went one further and contributed the fix themselves: no-connect markers no longer absorb pins into wires passing underneath — verified against `kicad-cli`'s netlist as ground truth, and the corpus run showed it mattered (one board had eight I2C pairs falsely shorted).
+
+The release also closes out a quieter class of bugs: output nondeterminism. A hash-order audit fixed ~26 sites where findings could differ byte-for-byte between identical runs, and CI now runs every analyzer twice with an unpinned hash seed so the class stays dead. On the honesty front, analysis that can't run now says so instead of vanishing: cross-analysis reports a per-check `checks_run` manifest, connectivity-graph failures surface as a visible note, conditional `.kicad_dru` rules are skipped-and-counted rather than misapplied board-wide, and files newer than the tested KiCad format get a best-effort flag.
+
+Two things to check when upgrading. **GitHub Action users with multi-project repos must now set the `schematic`/`pcb` inputs explicitly** — auto-detection fails loudly with a candidate list instead of silently picking an arbitrary project. And if you consume `DS-003`'s `bom_size`, it now counts unique BOM lines rather than components. New opt-in goodness: pass `--schematic analysis/schematic.json` (or `--power-rails`) to `analyze_pcb.py` and the PCB checks classify your declared rails correctly; the new `power_net_resolution` block shows exactly what was resolved and how.
+
 ## 🧭 v2.2 — Hierarchical bus connectivity
 
 One theme: the schematic analyzer's view of connectivity now matches KiCad's. Bus groups (`D[0..7]`, `{SDA SCL}`, aliases) expand into member nets, bus entries and bus wires join the net graph, and hierarchical bus pins connect positionally per sheet instance — the phantom single-pin nets reported in #25 on bus-heavy hierarchical designs are gone (thanks Reid-n0rc for the clean report and repro). Where a bus connection genuinely can't be resolved, the analyzer now says so in a `bus_topology.unresolved` list instead of guessing.

@@ -6,6 +6,50 @@ This project follows [Semantic Versioning](https://semver.org/). Each release is
 
 ---
 
+## v2.2.1 — 2026-09-01
+
+**Theme: maintenance batch — 25 verified analyzer fixes. Field-reported false positives killed at the root, a whole class of output nondeterminism eliminated with a CI guard to keep it dead, and new observability surfaces so skipped or degraded analysis is visible instead of silent.**
+
+### Added
+
+- `power_net_resolution` block on PCB output: which nets classified as power/ground and under which resolution (`cli` / `schematic` / `heuristic`). New `--power-rails` flag; rails auto-read from `--schematic analysis/schematic.json` when provided. (KH-393, #40 — reported by curtisgalloway.)
+- `checks_run` manifest on cross-analysis output: every check reports whether it ran, why it was skipped, and how much it examined — no more silently absent checks. (KH-381)
+- `connectivity_graph_error` on PCB output when `--full` connectivity-graph construction fails — previously a silent `except: pass`. (audit KHPA-005 subset)
+- **FV-001** info finding when a file's format version is newer than the analyzer's tested maximum — analysis proceeds best-effort but says so. (audit KHPA-002)
+- `conditional_rules_skipped` note in `design_rule_compliance`: conditional `.kicad_dru` rules are skipped and counted instead of being wrongly applied board-wide. (KH-361)
+- Deep-review gate: quotes with `…` elision verify segment-wise, quarantine reasons include a nearest-match snippet, and computation-script paths anchor to the analysis directory regardless of cwd. (KH-384, KH-385)
+
+### Fixed
+
+- **#39** — GP-001 no longer counts a via's own antipad as a reference-plane gap; any via ≥ ~0.7 mm (including KiCad's 0.8 mm default) previously read as a return-path hole. (KH-392 — reported by curtisgalloway)
+- **#40** — Schematic-declared power rails are now threaded into all five PCB net-classification sites; per-port rails like `P1_VBUS` no longer silently read as signal in both directions. (KH-393 — reported by curtisgalloway)
+- **#41** — No-connect markers no longer create connectivity with wires passing mid-span beneath them; NC'd pins stay on their own net exactly as `kicad-cli` reports, and absorbing nets no longer inherit a false `no_connect` tag. Corpus impact was real: one board had eight I2C pairs falsely shorted. (Contributed by danielboston38.)
+- **#33** — ICs whose Description mentions an internal oscillator ("Internal Reference, Oscillator, …") are no longer reclassified as oscillators, and the clock-distribution fallback no longer invents clock outputs from the first non-power pin. (KH-370 — reported by William Leismer)
+- **#31** — BE-001 board-edge distance now measures to a `gr_rect` outline's four sides instead of its diagonal. (KH-357 — reported by Erik Norfelt)
+- Output byte-stability: eliminated a class of hash-order nondeterminism (RC-DET candidate pick, DO-DET rail lists, power-sequencing EN-net pick, XV-002 ordering, connectivity pad-pair ordering and ~20 sibling sites), and CI now runs every analyzer twice with an unpinned hash seed to keep the class dead. (KH-366, KH-367, KH-382, KH-394)
+- VP-001 reads the via `tenting` field actually written by the parser — tented vias-in-pad were always reported untented. (KH-358)
+- Duplicate voltage-divider findings sharing one `finding_id` are deduplicated at flatten, with a consumer-side belt in SPICE subcircuit collection. (KH-388)
+- PM-002 never renders negative "mm from board edge" distances, and parts placed entirely off-board are classified distinctly at warning severity instead of "overhangs board edge" at error. (KH-389)
+- DS-003 datasheet coverage counts unique BOM lines with the same denominator as SS-002, and both summaries name the basis. (KH-390)
+- `summarize_findings.py` renders deep-review rows honestly: `dr:<category>` rule labels, no column overflow, deep-review confidence vocabulary in its own bucket. (KH-391)
+- JSONC comment stripping in `.kicad-happy.json` is string-aware — config values containing `//` (URLs) or `/*` no longer corrupt the file and silently drop suppression layers. (KH-368)
+- `.kicad_pro` / `.kicad_dru` discovery matches by board stem instead of taking the first file in the directory, and `project_settings.source` names the file actually loaded. (KH-362)
+- Lifecycle: LC-ACT findings carry `confidence`/`evidence_source` (no more forced-low trust), LCSC-only unknowns report "unknown" instead of "active", and LC-005 single-source accounting distinguishes attempted vs responded sources with `status: None` never counted as active. Validated against live DigiKey/Mouser APIs. (KH-371, KH-372)
+- Thermal package-table estimates carry heuristic confidence in `_thermal_confidence`. (KH-387)
+- NR-001 critical-net edge routing reads `board_outline.edges` — the check was structurally unable to fire before. (KH-380)
+- Net-ID map resets before footprint extraction (latent cross-call state leak). (KH-363)
+- `bus_topology.unresolved` reasons are normalized snake_case tokens (documented in `net-tracing.md`), and repeated cluster ambiguity notes are deduplicated. 
+
+### Changed
+
+- **GitHub Action — behavior change:** project auto-detection is now deterministic. Repos with exactly one project auto-select as before; repos with multiple (or zero) KiCad projects **must set the `schematic`/`pcb` inputs explicitly** — the Action fails with a candidate list instead of silently analyzing an arbitrary project. PCB-only invocations (explicit `pcb` input) are unaffected. (KH-369)
+- DS-003's `bom_size` field now counts unique BOM lines (was per-component count) — consumers keying on it should note the basis change. (KH-390)
+- SKILL.md documents the flatpak-sandboxed `kicad-cli` `/tmp` restriction.
+
+**Validation:** full budgeted corpus regression gate over the entire release range (170,014 units, zero downgrades) plus incremental gates for late folds; contract suite 707 passed; per-analyzer determinism verified with unpinned hash seed; lifecycle fixes validated against live distributor APIs.
+
+**Thanks:** Erik Norfelt (#31), William Leismer (#33), Curtis Galloway (#39, #40 — two exemplary reports with exact line references), and danielboston38 (#41 — fix contributed with `kicad-cli` ground-truth verification).
+
 ## v2.2.0 — 2026-08-20
 
 **Theme: schematic connectivity correctness — hierarchical bus resolution, net identity, and provenance honesty. "Brick one" of the correctness-floor direction: analyzer connectivity is validated against KiCad's own netlist export as ground truth.**
