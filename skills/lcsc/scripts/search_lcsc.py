@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Search LCSC Electronics / JLCPCB parts catalog.
 
-Uses the free, unauthenticated jlcsearch community API (with direct wmsc.lcsc.com
-fallback for exact Cxxxxx part numbers) to search components by MPN, LCSC code,
-or parametric keywords.
+Uses the free, unauthenticated jlcsearch community API to search components
+by MPN, LCSC code, or parametric keywords. For exact Cxxxxx codes (and for
+every hit in --details mode) the result is enriched from LCSC's direct
+wmsc.lcsc.com product-detail endpoint, which supplies the manufacturer,
+datasheet URL and price breaks that jlcsearch no longer returns.
 
 Usage:
     python3 search_lcsc.py <query> [options]
@@ -20,32 +22,38 @@ Exit codes:
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 
+# Import from sibling script (same skill)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fetch_datasheet_lcsc import (
+    _get_datasheet_url,
+    _get_description,
+    _get_lcsc_code,
+    _get_manufacturer,
+    _get_mpn,
+    _parse_extra,
+    search_lcsc_direct,
+)
+
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 _JLCSEARCH_BASE = "https://jlcsearch.tscircuit.com"
-
-
-def _parse_extra(component: dict) -> dict:
-    """Parse component 'extra' field safely whether it is a JSON string or dict."""
-    extra = component.get("extra")
-    if extra is None:
-        return {}
-    if isinstance(extra, str):
-        try:
-            parsed = json.loads(extra)
-            component["extra"] = parsed
-            return parsed
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    return extra if isinstance(extra, dict) else {}
+_LCSC_CODE_RE = re.compile(r"^C\d+$", re.IGNORECASE)
+_ENRICH_DELAY_S = 0.5  # be respectful to LCSC when enriching several hits
 
 
 def search_jlcsearch(query: str, limit: int = 20, package: str = "", category: str = "") -> list[dict]:
-    """Query the jlcsearch community API."""
+    """Query the jlcsearch community API.
+
+    General search returns ``{"components": [...]}``. Category endpoints
+    return ``{"<category>": [...]}`` (keyed by the category name), so read
+    the first list-valued key rather than assuming ``components``.
+    """
     if category:
         endpoint = f"/{category.strip('/')}/list.json?search={urllib.parse.quote(query)}"
         url = f"{_JLCSEARCH_BASE}{endpoint}"
@@ -58,115 +66,128 @@ def search_jlcsearch(query: str, limit: int = 20, package: str = "", category: s
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-        comps = data.get("components", [])
+        comps = data.get("components")
+        if comps is None:
+            comps = next((v for v in data.values() if isinstance(v, list)), [])
         for c in comps:
             _parse_extra(c)
         return comps
 
 
-def lookup_wmsc_direct(lcsc_code: str) -> dict | None:
-    """Query LCSC direct wmsc API for exact Cxxxxx code fallback."""
-    if not re.match(r"^C\d+$", lcsc_code, re.IGNORECASE):
-        return None
+def _parse_attributes(c: dict) -> dict:
+    """Return parametric attributes as a dict.
 
-    url = f"https://wmsc.lcsc.com/ftps/wm/product/detail?productCode={lcsc_code.upper()}"
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": _USER_AGENT,
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            result = data.get("result") or data
-            if not result or isinstance(result, str):
-                return None
-            num_code = int(re.sub(r"\D", "", lcsc_code))
-            return {
-                "lcsc": num_code,
-                "mfr": result.get("productModel", ""),
-                "package": result.get("encapStandard", "-"),
-                "description": result.get("productIntroEn", "") or result.get("productDescEn", ""),
-                "datasheet": result.get("pdfUrl", ""),
-                "stock": result.get("stockNumber", 0),
-                "price": result.get("productPriceList", [{}])[0].get("productPrice", 0) if result.get("productPriceList") else 0,
-                "is_basic": False,
-                "extra": {
-                    "number": lcsc_code.upper(),
-                    "mpn": result.get("productModel", ""),
-                    "manufacturer": {"name": result.get("brandNameEn", "")},
-                    "package": result.get("encapStandard", "-"),
-                    "description": result.get("productIntroEn", "") or result.get("productDescEn", ""),
-                    "quantity": result.get("stockNumber", 0),
-                    "datasheet": {"pdf": result.get("pdfUrl", "")},
-                }
-            }
-    except Exception:
-        return None
+    Category endpoints ship ``attributes`` as a JSON string; the wmsc
+    fallback (via ``extra``) may ship a dict. Both normalize to a dict.
+    """
+    attrs = c.get("attributes")
+    if attrs is None:
+        attrs = _parse_extra(c).get("attributes")
+    if isinstance(attrs, str):
+        try:
+            attrs = json.loads(attrs)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return attrs if isinstance(attrs, dict) else {}
+
+
+def _price_breaks(price) -> list[dict]:
+    """Normalize a price-break list to ``[{"min_qty": int, "price": float}]``.
+
+    Accepts the wmsc ladder rows (``ladder`` / ``usdPrice``) that
+    ``search_lcsc_direct`` passes through as ``price``, plus the legacy
+    jlcsearch shapes (``qFrom`` / ``price`` and ``min_qty`` / ``price``).
+    """
+    breaks = []
+    if not isinstance(price, list):
+        return breaks
+    for p in price:
+        if not isinstance(p, dict):
+            continue
+        qty = p.get("ladder", p.get("min_qty", p.get("qFrom", 1)))
+        val = p.get("usdPrice", p.get("price", p.get("productPrice", 0)))
+        try:
+            breaks.append({"min_qty": int(qty), "price": float(val)})
+        except (TypeError, ValueError):
+            continue
+    return breaks
 
 
 def normalize_component(c: dict) -> dict:
-    """Normalize fields across different API response formats."""
-    extra = _parse_extra(c)
+    """Normalize fields across the jlcsearch search, category and wmsc shapes."""
+    attrs = _parse_attributes(c)
     lcsc_id = c.get("lcsc")
-    number = extra.get("number") or (f"C{lcsc_id}" if lcsc_id else "")
 
-    mpn = extra.get("mpn") or c.get("mfr") or ""
-    mfr_info = extra.get("manufacturer")
-    if isinstance(mfr_info, dict):
-        mfr_name = mfr_info.get("name", "")
-    elif isinstance(mfr_info, str):
-        mfr_name = mfr_info
-    else:
-        mfr_name = c.get("manufacturer", "")
+    pkg = _parse_extra(c).get("package") or c.get("package") or "-"
+    desc = _get_description(c)
+    if not desc and attrs:
+        # Category rows ship an empty description; the parametric values are
+        # the next best one-line summary.
+        desc = " ".join(str(v) for v in attrs.values() if v not in (None, "", "-"))
 
-    pkg = extra.get("package") or c.get("package") or "-"
-    desc = extra.get("description") or c.get("description") or ""
-
-    # Stock
-    stock = extra.get("quantity")
+    stock = c.get("stock")
     if stock is None:
-        stock = c.get("stock", 0)
+        stock = 0
 
-    # Basic part check
+    # Basic part check (category rows may lack it; older shapes used 'basic')
     is_basic = c.get("is_basic")
     if is_basic is None:
         is_basic = bool(c.get("basic", 0))
 
-    # Price
+    # Price: general search gives a scalar 'price'; category rows give
+    # 'price1'; wmsc gives a ladder list in 'price'.
+    prices = _price_breaks(c.get("price"))
     price = c.get("price")
     if price is None or isinstance(price, list):
-        prices = extra.get("prices") or (price if isinstance(price, list) else [])
-        if prices and isinstance(prices[0], dict):
-            price = prices[0].get("price", 0)
-        else:
-            price = 0.0
-
-    # Datasheet
-    ds = extra.get("datasheet")
-    if isinstance(ds, dict):
-        datasheet_url = ds.get("pdf", "")
-    else:
-        datasheet_url = c.get("datasheet") or (ds if isinstance(ds, str) else "")
+        price = c.get("price1")
+        if price is None:
+            price = prices[0]["price"] if prices else 0.0
 
     return {
-        "lcsc_code": number,
-        "lcsc_id": lcsc_id,
-        "mpn": mpn,
-        "manufacturer": mfr_name,
+        "lcsc_code": _get_lcsc_code(c),
+        "lcsc_id": int(lcsc_id) if str(lcsc_id or "").isdigit() else lcsc_id,
+        "mpn": _get_mpn(c),
+        "manufacturer": _get_manufacturer(c),
         "package": pkg,
         "description": desc.strip(),
         "is_basic": bool(is_basic),
         "stock": int(stock) if stock is not None else 0,
         "price_usd": float(price) if price else 0.0,
-        "datasheet_url": datasheet_url,
-        "attributes": extra.get("attributes", {}),
-        "prices": extra.get("prices", []),
-        "warehouses": {
-            "js": extra.get("whs-js", 0),
-            "zh": extra.get("whs-zh", 0),
-            "hk": extra.get("whs-hk", 0),
-        }
+        "datasheet_url": _get_datasheet_url(c),
+        "attributes": attrs,
+        "prices": prices,
     }
+
+
+def enrich_from_wmsc(item: dict) -> dict:
+    """Fill blanks in a normalized item from LCSC's direct product-detail API.
+
+    jlcsearch no longer returns manufacturer, datasheet URL or price breaks,
+    so those come from wmsc.lcsc.com via ``search_lcsc_direct``. Stock and
+    unit price stay as jlcsearch reported them (the JLCPCB assembly figures)
+    unless jlcsearch had none.
+    """
+    code = item.get("lcsc_code", "")
+    if not _LCSC_CODE_RE.match(code):
+        return item
+    direct = search_lcsc_direct(code)
+    if not direct:
+        return item
+    detail = normalize_component(direct)
+    for key in ("mpn", "manufacturer", "description", "datasheet_url"):
+        if not item.get(key):
+            item[key] = detail[key]
+    if item.get("package") in ("", "-") and detail["package"] != "-":
+        item["package"] = detail["package"]
+    if not item.get("attributes"):
+        item["attributes"] = detail["attributes"]
+    if not item.get("prices"):
+        item["prices"] = detail["prices"]
+    if not item.get("stock"):
+        item["stock"] = detail["stock"]
+    if not item.get("price_usd"):
+        item["price_usd"] = detail["price_usd"]
+    return item
 
 
 def format_table(results: list[dict]) -> str:
@@ -205,7 +226,7 @@ def format_details(item: dict) -> str:
         f"Manufacturer:   {item['manufacturer'] or '-'}",
         f"Package:        {item['package']}",
         f"JLCPCB Type:    {part_type}",
-        f"Total Stock:    {item['stock']:,} (JS: {item['warehouses']['js']:,}, ZH: {item['warehouses']['zh']:,}, HK: {item['warehouses']['hk']:,})",
+        f"Stock:          {item['stock']:,}",
         f"Unit Price:     ${item['price_usd']:.4f} USD",
         f"Datasheet:      {item['datasheet_url'] or '-'}",
         f"Description:    {item['description']}",
@@ -219,12 +240,9 @@ def format_details(item: dict) -> str:
 
     prices = item.get("prices", [])
     if prices:
-        lines.append("Price Breaks:")
+        lines.append("LCSC Price Breaks:")
         for p in prices:
-            q_min = p.get("min_qty", p.get("qFrom", 1))
-            q_max = p.get("max_qty", p.get("qTo", "+"))
-            price_val = p.get("price", 0)
-            lines.append(f"  • {q_min}-{q_max}: ${price_val:.4f} USD")
+            lines.append(f"  • {p['min_qty']}+: ${p['price']:.4f} USD")
 
     return "\n".join(lines)
 
@@ -248,12 +266,13 @@ def main():
     parser.add_argument("--min-stock", type=int, default=0, help="Minimum stock count required")
     parser.add_argument("--category", default="", help="Category search (resistors, capacitors, microcontrollers, voltage_regulators)")
     parser.add_argument("--sort", choices=["relevance", "price", "stock"], default="relevance", help="Sort results")
-    parser.add_argument("-v", "--details", action="store_true", help="Show detailed view of results")
+    parser.add_argument("-v", "--details", action="store_true", help="Show detailed view of results (enriched from LCSC, one extra request per result)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON format")
 
     args = parser.parse_args()
 
     query = args.query.strip()
+    is_lcsc_code = bool(_LCSC_CODE_RE.match(query))
     try:
         raw_components = search_jlcsearch(
             query=query,
@@ -262,17 +281,16 @@ def main():
             category=args.category
         )
     except Exception as e:
-        # Fallback to direct lookup if query is an LCSC code
-        if re.match(r"^C\d+$", query, re.IGNORECASE):
-            direct = lookup_wmsc_direct(query)
-            raw_components = [direct] if direct else []
+        # An exact LCSC code can still be served by the direct lookup below
+        if is_lcsc_code:
+            raw_components = []
         else:
             print(f"Error connecting to jlcsearch API: {e}", file=sys.stderr)
             sys.exit(2)
 
     # Fallback to wmsc direct if jlcsearch returned nothing for Cxxxxx code
-    if not raw_components and re.match(r"^C\d+$", query, re.IGNORECASE):
-        direct = lookup_wmsc_direct(query)
+    if not raw_components and is_lcsc_code:
+        direct = search_lcsc_direct(query)
         if direct:
             raw_components = [direct]
 
@@ -300,6 +318,15 @@ def main():
 
     # Limit
     results = filtered[:args.limit]
+
+    # Enrich from LCSC direct: always for an exact Cxxxxx query, and for
+    # every displayed hit in --details mode (manufacturer, datasheet, price
+    # breaks are not in jlcsearch responses any more).
+    if is_lcsc_code or args.details:
+        for idx, item in enumerate(results):
+            if idx:
+                time.sleep(_ENRICH_DELAY_S)
+            enrich_from_wmsc(item)
 
     if args.json:
         print(json.dumps({
